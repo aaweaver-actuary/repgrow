@@ -1,0 +1,1295 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+src/
+  domain/
+    candidate_move.rs
+    candidate_request.rs
+    color.rs
+    fen_key.rs
+    mod.rs
+    repertoire_node.rs
+    signals.rs
+  infra/
+    cache/
+      mod.rs
+    http/
+      mod.rs
+    rate/
+      mod.rs
+    scheduler/
+      mod.rs
+    singleflight/
+      mod.rs
+    mod.rs
+  pgn/
+    mod.rs
+  policy/
+    decision.rs
+    mod.rs
+    split_side_policy.rs
+  provider/
+    cloud_eval.rs
+    explorer.rs
+    mod.rs
+    popularity_caps.rs
+    quality_caps.rs
+    types.rs
+  search/
+    mod.rs
+    orchestrator.rs
+  cli.rs
+  config.rs
+  lib.rs
+  main.rs
+tests/
+  contract_popularity.rs
+  contract_quality.rs
+  pgn_golden.rs
+.gitignore
+Cargo.toml
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/domain/candidate_move.rs">
+use super::fen_key::FenKey;
+use super::signals::Signals;
+
+#[derive(Clone, Debug)]
+pub struct CandidateMove {
+    pub uci: String,
+    pub next_fen: FenKey,
+    pub signals: Signals,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_candidate_move_creation() {
+        let move_ = CandidateMove {
+            uci: "e2e4".to_string(),
+            next_fen: FenKey {
+                fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1".to_string(),
+                stm: crate::domain::PieceColor::Black,
+            },
+            signals: Signals {
+                popularity: 0.75,
+                quality: 0.85,
+            },
+        };
+
+        assert_eq!(move_.uci, "e2e4");
+        assert_eq!(
+            move_.next_fen.fen,
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        );
+        assert_eq!(move_.next_fen.stm, crate::domain::PieceColor::Black);
+        assert_eq!(move_.signals.popularity, 0.75);
+        assert_eq!(move_.signals.quality, 0.85);
+    }
+}
+</file>
+
+<file path="src/domain/candidate_request.rs">
+use super::fen_key::FenKey;
+
+#[derive(Clone, Debug)]
+pub struct CandidateRequest {
+    pub fen_key: FenKey,
+    pub max_candidates: usize,
+    pub cp_window: f32,     // for quality
+    pub min_play_rate: f32, // for popularity
+    pub multipv: usize,     // for quality
+}
+</file>
+
+<file path="src/domain/color.rs">
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PieceColor {
+    White,
+    Black,
+}
+
+impl PieceColor {
+    pub fn to_string(&self) -> &str {
+        match self {
+            PieceColor::White => "white",
+            PieceColor::Black => "black",
+        }
+    }
+
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            'w' | 'W' => Some(PieceColor::White),
+            'b' | 'B' => Some(PieceColor::Black),
+            _ => None,
+        }
+    }
+
+    pub fn to_shakmaty(&self) -> shakmaty::Color {
+        match self {
+            PieceColor::White => shakmaty::Color::White,
+            PieceColor::Black => shakmaty::Color::Black,
+        }
+    }
+
+    pub fn from_shakmaty(c: shakmaty::Color) -> Self {
+        match c {
+            shakmaty::Color::White => PieceColor::White,
+            shakmaty::Color::Black => PieceColor::Black,
+        }
+    }
+}
+</file>
+
+<file path="src/domain/fen_key.rs">
+use serde::{Deserialize, Serialize};
+
+use crate::domain::PieceColor;
+
+/// FEN + side-to-move forms a canonical lookup key.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FenKey {
+    pub fen: String,
+    pub stm: PieceColor,
+}
+</file>
+
+<file path="src/domain/mod.rs">
+pub mod candidate_move;
+pub mod candidate_request;
+pub mod color;
+pub mod fen_key;
+pub mod repertoire_node;
+pub mod signals;
+
+pub use candidate_move::CandidateMove;
+pub use candidate_request::CandidateRequest;
+pub use color::PieceColor;
+pub use fen_key::FenKey;
+pub use repertoire_node::RepertoireNode;
+pub use signals::Signals;
+
+/// Convenience structs returned by specialized providers before normalization.
+#[derive(Clone, Debug)]
+pub struct EvalLine {
+    pub uci: String,
+    pub eval_cp: i32,
+    pub depth: u8,
+}
+#[derive(Clone, Debug)]
+pub struct PopularityRow {
+    pub uci: String,
+    pub play_rate: f32,
+    pub games: u32,
+}
+</file>
+
+<file path="src/domain/repertoire_node.rs">
+use crate::domain::Signals;
+
+use super::fen_key::FenKey;
+
+#[derive(Clone, Debug)]
+pub struct RepertoireNode {
+    pub id: u64,
+    pub parent: Option<u64>,
+    pub fen_key: FenKey,
+    pub last_move_uci: Option<String>,
+    pub ply_depth: u32,
+    pub children: Vec<u64>,
+    pub signals: Signals,
+}
+</file>
+
+<file path="src/domain/signals.rs">
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_signals_default() {
+        let s = Signals::default();
+        assert_eq!(s.eval_cp, None);
+        assert_eq!(s.depth, None);
+        assert_eq!(s.play_rate, None);
+        assert_eq!(s.games, None);
+    }
+
+    #[test]
+    fn test_signals_new_values() {
+        let s = Signals {
+            eval_cp: Some(42.5),
+            depth: Some(12),
+            play_rate: Some(0.8),
+            games: Some(100),
+        };
+        assert_eq!(s.eval_cp, Some(42.5));
+        assert_eq!(s.depth, Some(12));
+        assert_eq!(s.play_rate, Some(0.8));
+        assert_eq!(s.games, Some(100));
+    }
+
+    #[test]
+    fn test_signals_clone() {
+        let s1 = Signals {
+            eval_cp: Some(-3.2),
+            depth: Some(5),
+            play_rate: None,
+            games: Some(7),
+        };
+        let s2 = s1.clone();
+        assert_eq!(s1.eval_cp, s2.eval_cp);
+        assert_eq!(s1.depth, s2.depth);
+        assert_eq!(s1.play_rate, s2.play_rate);
+        assert_eq!(s1.games, s2.games);
+    }
+
+    #[test]
+    fn test_signals_debug() {
+        let s = Signals {
+            eval_cp: Some(1.0),
+            depth: Some(2),
+            play_rate: Some(0.5),
+            games: Some(10),
+        };
+        let dbg = format!("{:?}", s);
+        assert!(dbg.contains("Signals"));
+        assert!(dbg.contains("eval_cp: Some(1.0)"));
+        assert!(dbg.contains("depth: Some(2)"));
+        assert!(dbg.contains("play_rate: Some(0.5)"));
+        assert!(dbg.contains("games: Some(10)"));
+    }
+}
+/// Signals union carried by candidates; expandable without changing traits.
+#[derive(Clone, Debug, Default)]
+pub struct Signals {
+    pub eval_cp: Option<f32>,
+    pub depth: Option<u8>,
+    pub play_rate: Option<f32>,
+    pub games: Option<u32>,
+}
+</file>
+
+<file path="src/infra/cache/mod.rs">
+use async_trait::async_trait;
+use std::{hash::Hash, sync::Arc};
+use moka::future::Cache;
+
+/// Minimal cache trait to decouple from moka.
+#[async_trait]
+pub trait KvCache<K, V>: Send + Sync
+where
+    K: Eq + Hash + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    async fn get(&self, k: &K) -> Option<Arc<V>>;
+    async fn put(&self, k: K, v: Arc<V>);
+}
+
+/// Moka-backed in-memory cache.
+pub struct MemCache<K, V> {
+    inner: Cache<K, Arc<V>>,
+}
+
+impl<K, V> MemCache<K, V>
+where
+    K: Eq + Hash + Clone + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    pub fn new(capacity: u64, ttl_secs: u64) -> Self {
+        let inner = Cache::builder()
+            .max_capacity(capacity)
+            .time_to_live(std::time::Duration::from_secs(ttl_secs))
+            .build();
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl<K, V> KvCache<K, V> for MemCache<K, V>
+where
+    K: Eq + Hash + Clone + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    async fn get(&self, k: &K) -> Option<Arc<V>> { self.inner.get(k).await }
+    async fn put(&self, k: K, v: Arc<V>) { self.inner.insert(k, v).await; }
+}
+</file>
+
+<file path="src/infra/http/mod.rs">
+use reqwest::Client;
+
+pub fn build_http(timeout_ms: u64) -> Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(timeout_ms))
+        .build()
+        .expect("reqwest client")
+}
+</file>
+
+<file path="src/infra/rate/mod.rs">
+use governor::{
+    clock::DefaultClock, state::InMemoryState, state::NotKeyed, Quota, RateLimiter as GovLimiter,
+};
+use std::{num::NonZeroU32, sync::Arc};
+
+/// Minimal rate-limiter interface.
+#[derive(Clone)]
+pub struct RateLimiter {
+    inner: Arc<GovLimiter<NotKeyed, InMemoryState, DefaultClock>>,
+}
+
+impl RateLimiter {
+    pub fn per_sec(n: u32) -> Self {
+        let q = Quota::per_second(NonZeroU32::new(n.max(1)).unwrap());
+        Self {
+            inner: Arc::new(GovLimiter::<NotKeyed, InMemoryState, DefaultClock>::direct(
+                q,
+            )),
+        }
+    }
+    pub async fn acquire(&self) {
+        use governor::Jitter;
+        let _ = self
+            .inner
+            .until_ready_with_jitter(Jitter::up_to(std::time::Duration::from_millis(30)))
+            .await;
+    }
+}
+</file>
+
+<file path="src/infra/scheduler/mod.rs">
+use async_trait::async_trait;
+use tokio::sync::mpsc;
+
+#[async_trait]
+pub trait TaskScheduler: Send + Sync {
+    async fn spawn<F>(&self, fut: F) where F: std::future::Future<Output = ()> + Send + 'static;
+    fn channel<T: Send + 'static>(&self, cap: usize) -> (mpsc::Sender<T>, mpsc::Receiver<T>);
+}
+
+#[derive(Clone, Default)]
+pub struct TokioScheduler;
+
+#[async_trait]
+impl TaskScheduler for TokioScheduler {
+    async fn spawn<F>(&self, fut: F) where F: std::future::Future<Output = ()> + Send + 'static {
+        tokio::spawn(fut);
+    }
+    fn channel<T: Send + 'static>(&self, cap: usize) -> (mpsc::Sender<T>, mpsc::Receiver<T>) {
+        mpsc::channel(cap)
+    }
+}
+</file>
+
+<file path="src/infra/singleflight/mod.rs">
+use std::collections::HashMap;
+use std::future::Future;
+use std::hash::Hash;
+use std::sync::Arc;
+use tokio::sync::{Mutex, oneshot};
+
+/// Simple single-flight coalescer to dedupe inflight requests per key.
+pub struct SingleFlight<K, V> {
+    inflight: Mutex<HashMap<K, Vec<oneshot::Sender<Arc<V>>>>>,
+}
+
+impl<K, V> SingleFlight<K, V>
+where K: Eq + Hash + Clone {
+    pub fn new() -> Self { Self { inflight: Mutex::new(HashMap::new()) } }
+
+    /// Run f once for key k; concurrent callers await same result.
+    pub async fn run<F, Fut>(&self, k: K, f: F) -> anyhow::Result<Arc<V>>
+    where
+        F: FnOnce(K) -> Fut + Send + 'static,
+        Fut: Future<Output = anyhow::Result<Arc<V>>> + Send + 'static,
+        V: Send + Sync + 'static,
+    {
+        let (rx_opt, do_fetch) = {
+            let mut g = self.inflight.lock().await;
+            if let Some(waiters) = g.get_mut(&k) {
+                let (tx, rx) = oneshot::channel();
+                waiters.push(tx);
+                (Some(rx), false)
+            } else {
+                g.insert(k.clone(), Vec::new());
+                (None, true)
+            }
+        };
+
+        if !do_fetch {
+            return Ok(rx_opt.unwrap().await.expect("inflight canceled"));
+        }
+
+        let res = f(k.clone()).await;
+        let waiters = {
+            let mut g = self.inflight.lock().await;
+            g.remove(&k).unwrap_or_default()
+        };
+        match &res {
+            Ok(v) => {
+                for w in waiters { let _ = w.send(v.clone()); }
+            }
+            Err(_) => {
+                for w in waiters { let _ = w.send(Arc::new(panic!("no value"))); }
+            }
+        }
+        res
+    }
+}
+</file>
+
+<file path="src/infra/mod.rs">
+use crate::config::{AppConfig, CacheCfg, HttpCfg, RateCfg};
+use crate::infra::{cache::MemCache, rate::RateLimiter, singleflight::SingleFlight};
+use std::sync::Arc;
+
+pub mod cache;
+pub mod http;
+pub mod rate;
+pub mod scheduler;
+pub mod singleflight;
+
+/// Bundle of shared infra for providers/orchestrator.
+#[derive(Clone)]
+pub struct Infra {
+    pub cache_fen: Arc<MemCache<String, serde_json::Value>>, // example: cache raw blobs by FEN
+    pub single: Arc<SingleFlight<String, serde_json::Value>>,
+    pub rate_cloud: RateLimiter,
+    pub rate_explorer: RateLimiter,
+    pub http: reqwest::Client,
+    pub sched: scheduler::TokioScheduler,
+}
+
+pub fn build_infra(cfg: &AppConfig) -> anyhow::Result<Infra> {
+    let cache_fen = Arc::new(MemCache::new(cfg.cache.entries, cfg.cache.ttl_secs));
+    let single = Arc::new(SingleFlight::new());
+    Ok(Infra {
+        cache_fen,
+        single,
+        rate_cloud: RateLimiter::per_sec(cfg.rate.cloud_per_sec),
+        rate_explorer: RateLimiter::per_sec(cfg.rate.explorer_per_sec),
+        http: http::build_http(cfg.http.timeout_ms),
+        sched: scheduler::TokioScheduler::default(),
+    })
+}
+</file>
+
+<file path="src/pgn/mod.rs">
+use crate::domain::RepertoireNode;
+
+/// Writer interface for alternate outputs later (JSON, DB, etc.)
+pub trait RepertoireWriter {
+    fn write(&self, root: &RepertoireNode) -> anyhow::Result<String>;
+}
+
+/// Minimal PGN writer that walks the node arena from the root.
+/// For brevity, this example assumes node 0 is root and siblings are variations.
+#[derive(Default)]
+pub struct PgnWriter;
+
+impl RepertoireWriter for PgnWriter {
+    fn write(&self, _root: &RepertoireNode) -> anyhow::Result<String> {
+        // TODO: traverse stored arena (you may want to give writer a ref to arena)
+        // Emit tag pairs, SetUp/FEN when not initial, then SAN tokens + variations.
+        Ok(String::from("[Event \"Repertoire\"]\n\n1. e4 e5 *\n"))
+    }
+}
+</file>
+
+<file path="src/policy/decision.rs">
+/// Which role to use at a node.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Decision {
+    Quality,
+    Popularity,
+    Hybrid,
+}
+</file>
+
+<file path="src/policy/mod.rs">
+pub mod decision;
+pub mod split_side_policy;
+
+pub use decision::Decision;
+pub use split_side_policy::SideSplitPolicy;
+
+use crate::domain::CandidateRequest;
+use crate::provider::types::CandidateMoves;
+use shakmaty::Color;
+
+/// Policy decides role and request shaping, and can post-filter.
+pub trait MovePolicy: Send + Sync {
+    fn decide(&self, stm: Color) -> Decision;
+    fn adjust(&self, req: &mut CandidateRequest, is_my_side: bool);
+    fn post_filter(&self, mut cands: CandidateMoves) -> CandidateMoves {
+        // Stable ordering: primary → secondary → UCI for determinism
+        cands.sort_by(|a, b| {
+            let pa_eval = a.signals.eval_cp.unwrap_or(-10000.0);
+            let pb_eval = b.signals.eval_cp.unwrap_or(-10000.0);
+
+            match pa_eval
+                .partial_cmp(&pb_eval)
+                .unwrap_or(std::cmp::Ordering::Equal)
+            {
+                std::cmp::Ordering::Equal => {
+                    let pa_play = a.signals.play_rate.unwrap_or(-1.0);
+                    let pb_play = b.signals.play_rate.unwrap_or(-1.0);
+                    match pa_play
+                        .partial_cmp(&pb_play)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                    {
+                        std::cmp::Ordering::Equal => a.uci.cmp(&b.uci),
+                        other => other,
+                    }
+                }
+                other => other,
+            }
+        });
+        cands
+    }
+}
+</file>
+
+<file path="src/policy/split_side_policy.rs">
+use shakmaty::Color;
+
+use crate::{
+    domain::CandidateRequest,
+    policy::{Decision, MovePolicy},
+};
+
+/// Default: my side → quality (engine); opponent → popularity (explorer)
+pub struct SideSplitPolicy {
+    my_side: Color,
+    cp_window: i32,
+    min_play_rate: f32,
+}
+
+impl SideSplitPolicy {
+    pub fn new(my_side: Color, cp_window: i32, min_play_rate: f32) -> Self {
+        Self {
+            my_side,
+            cp_window,
+            min_play_rate,
+        }
+    }
+}
+
+impl MovePolicy for SideSplitPolicy {
+    fn decide(&self, stm: Color) -> Decision {
+        if stm == self.my_side {
+            Decision::Quality
+        } else {
+            Decision::Popularity
+        }
+    }
+    fn adjust(&self, req: &mut CandidateRequest, is_my_side: bool) {
+        if is_my_side {
+            req.cp_window = self.cp_window as f32;
+        } else {
+            req.min_play_rate = self.min_play_rate as f32;
+        }
+    }
+}
+</file>
+
+<file path="src/provider/cloud_eval.rs">
+use crate::{
+    config::QualityCfg,
+    domain::{EvalLine, FenKey},
+    infra::Infra,
+    provider::{MoveQuality, QualityCaps},
+};
+use async_trait::async_trait;
+use std::sync::Arc;
+
+/// Lichess Cloud Evaluation provider (engine-quality).
+/// Talks to /api/cloud-eval and returns MultiPV lines.
+pub struct CloudEval {
+    cfg: QualityCfg,
+    infra: Infra,
+}
+
+impl CloudEval {
+    pub fn new(cfg: QualityCfg, infra: Infra) -> Self {
+        Self { cfg, infra }
+    }
+}
+
+#[async_trait]
+impl MoveQuality for CloudEval {
+    async fn evaluate(&self, fen: &FenKey, multipv: usize) -> anyhow::Result<Vec<EvalLine>> {
+        // TODO: use infra.http + infra.rate_cloud + infra.cache to fetch & parse
+        // Return Vec<EvalLine> with (uci, eval_cp, depth)
+        anyhow::bail!("not implemented: cloud-eval HTTP call")
+    }
+    fn caps(&self) -> QualityCaps {
+        QualityCaps {
+            max_multipv: self.cfg.cloud_multi_pv,
+        }
+    }
+}
+</file>
+
+<file path="src/provider/explorer.rs">
+use async_trait::async_trait;
+use crate::{config::PopularityCfg, infra::Infra, provider::{MovePopularity, PopularityCaps}, domain::{FenKey, PopularityRow}};
+
+/// Lichess Opening Explorer popularity provider.
+pub struct Explorer {
+    cfg: PopularityCfg,
+    infra: Infra,
+}
+
+impl Explorer {
+    pub fn new(cfg: PopularityCfg, infra: Infra) -> Self { Self { cfg, infra } }
+}
+
+#[async_trait]
+impl MovePopularity for Explorer {
+    async fn sample(&self, fen: &FenKey) -> anyhow::Result<Vec<PopularityRow>> {
+        // TODO: use infra.http + infra.rate_explorer + infra.cache to fetch & parse
+        // Compute frequencies server-side or return counts & let orchestrator compute rate.
+        anyhow::bail!("not implemented: explorer HTTP call")
+    }
+    fn caps(&self) -> PopularityCaps { PopularityCaps { supports_filters: true } }
+}
+</file>
+
+<file path="src/provider/mod.rs">
+pub mod cloud_eval;
+pub mod explorer;
+pub mod popularity;
+pub mod popularity_caps;
+pub mod quality;
+pub mod quality_caps;
+pub mod types;
+
+pub use cloud_eval::CloudEval;
+pub use explorer::Explorer;
+pub use popularity_caps::PopularityCaps;
+pub use quality_caps::QualityCaps;
+pub use types::CandidateMoves;
+
+use crate::{
+    config::{PopularityCfg, QualityCfg},
+    domain::{CandidateMove, EvalLine, FenKey, PopularityRow, Signals},
+    infra::Infra,
+    provider::types::EvalLines,
+};
+use async_trait::async_trait;
+use std::sync::Arc;
+
+#[async_trait]
+pub trait MoveQuality: Send + Sync {
+    async fn evaluate(&self, fen: &FenKey, multipv: usize) -> anyhow::Result<Vec<EvalLine>>;
+    fn caps(&self) -> QualityCaps;
+}
+
+#[async_trait]
+pub trait MovePopularity: Send + Sync {
+    async fn sample(&self, fen: &FenKey) -> anyhow::Result<Vec<PopularityRow>>;
+    fn caps(&self) -> PopularityCaps;
+}
+
+/// Factory: late-bind providers from config.
+pub fn build_quality(cfg: &QualityCfg, infra: &Infra) -> anyhow::Result<Arc<dyn MoveQuality>> {
+    match cfg.provider.as_str() {
+        "cloud_eval" => Ok(Arc::new(CloudEval::new(cfg.clone(), infra.clone()))),
+        other => anyhow::bail!("unknown quality provider '{other}'"),
+    }
+}
+pub fn build_popularity(
+    cfg: &PopularityCfg,
+    infra: &Infra,
+) -> anyhow::Result<Arc<dyn MovePopularity>> {
+    match cfg.provider.as_str() {
+        "explorer" => Ok(Arc::new(Explorer::new(cfg.clone(), infra.clone()))),
+        other => anyhow::bail!("unknown popularity provider '{other}'"),
+    }
+}
+
+/// Normalize specialized outputs into unified CandidateMove.
+pub fn normalize_quality(fen: &FenKey, lines: EvalLines) -> CandidateMoves {
+    lines
+        .into_iter()
+        .map(|l| {
+            let mut sig = Signals::default();
+            sig.eval_cp = Some(l.eval_cp as f32);
+            sig.depth = Some(l.depth);
+            // next_fen is filled by orchestrator using shakmaty (legal move application)
+            CandidateMove {
+                uci: l.uci,
+                next_fen: fen.clone(),
+                signals: sig,
+            }
+        })
+        .collect()
+}
+pub fn normalize_popularity(fen: &FenKey, rows: Vec<PopularityRow>) -> CandidateMoves {
+    rows.into_iter()
+        .map(|r| {
+            let mut sig = Signals::default();
+            sig.play_rate = Some(r.play_rate);
+            sig.games = Some(r.games);
+            CandidateMove {
+                uci: r.uci,
+                next_fen: fen.clone(),
+                signals: sig,
+            }
+        })
+        .collect()
+}
+</file>
+
+<file path="src/provider/popularity_caps.rs">
+pub struct PopularityCaps {
+    pub supports_filters: bool,
+}
+</file>
+
+<file path="src/provider/quality_caps.rs">
+pub struct QualityCaps {
+    pub max_multipv: usize,
+}
+</file>
+
+<file path="src/provider/types.rs">
+use super::{CandidateMove, EvalLine};
+
+pub type CandidateMoves = Vec<CandidateMove>;
+pub type EvalLines = Vec<EvalLine>;
+</file>
+
+<file path="src/search/mod.rs">
+pub mod orchestrator;
+</file>
+
+<file path="src/search/orchestrator.rs">
+use crate::{
+    config::SearchCfg,
+    domain::{CandidateRequest, FenKey, PieceColor, RepertoireNode},
+    infra::Infra,
+    policy::{Decision, MovePolicy},
+    provider::{normalize_popularity, normalize_quality, MovePopularity, MoveQuality},
+};
+use dashmap::DashSet;
+use shakmaty::{
+    fen::Fen, san::San, uci::Uci, CastlingMode::Standard, Chess, EnPassantMode::Legal, Position,
+};
+use std::option::Option;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+
+pub struct Orchestrator {
+    cfg: SearchCfg,
+    policy: Arc<dyn MovePolicy>,
+    quality: Arc<dyn MoveQuality>,
+    popularity: Arc<dyn MovePopularity>,
+    infra: Infra,
+    nodes: Vec<RepertoireNode>,
+    seen: DashSet<FenKey>,
+}
+
+impl Orchestrator {
+    pub fn new(
+        cfg: SearchCfg,
+        policy: impl MovePolicy + 'static,
+        q: Arc<dyn MoveQuality>,
+        p: Arc<dyn MovePopularity>,
+        infra: Infra,
+    ) -> Self {
+        Self {
+            cfg,
+            policy: Arc::new(policy),
+            quality: q,
+            popularity: p,
+            infra,
+            nodes: Vec::new(),
+            seen: DashSet::new(),
+        }
+    }
+
+    pub async fn build_from_start(
+        &mut self,
+        san_line: Option<&str>,
+        max_plies: u32,
+    ) -> anyhow::Result<RepertoireNode> {
+        let (root_fen, stm) = self.start_from_san(san_line)?;
+        let root = self.push_node(None, &root_fen, None, 0);
+        let (tx, mut rx) = mpsc::channel::<u64>(self.cfg.concurrency * 4);
+        tx.send(root.id).await.ok();
+
+        let rx = Arc::new(tokio::sync::Mutex::new(rx));
+        use std::sync::Mutex;
+        let orchestrator = Arc::new(Mutex::new(self));
+        for _ in 0..self.cfg.concurrency {
+            let rx2 = rx.clone();
+            let policy = self.policy.clone();
+            let orchestrator = orchestrator.clone();
+            let quality = self.quality.clone();
+            let popularity = self.popularity.clone();
+            let infra = self.infra.clone();
+            let tx2 = tx.clone();
+            tokio::spawn(async move {
+                loop {
+                    let nid_opt = {
+                        let mut guard = rx2.lock().await;
+                        guard.recv().await
+                    };
+                    if let Some(nid) = nid_opt {
+                        let mut orch_guard = orchestrator.lock().unwrap();
+                        orch_guard
+                            .expand_node(nid, max_plies, &*policy, &quality, &popularity, &tx2)
+                            .await
+                            .ok();
+                    } else {
+                        break;
+                    }
+                }
+            });
+        }
+
+        drop(tx); // allow workers to exit when queue drains
+                  // Wait for all tasks to finish by waiting for the channel to close
+        while Arc::strong_count(&rx) > 1 {
+            tokio::task::yield_now().await;
+        }
+        Ok(root)
+    }
+
+    fn start_from_san(&self, san_line: Option<&str>) -> anyhow::Result<(FenKey, shakmaty::Color)> {
+        let mut pos = Chess::default();
+        if let Some(line) = san_line {
+            for tok in line.split_whitespace() {
+                if tok.contains('.') {
+                    continue;
+                }
+                let san: San = tok.parse().map_err(|_| anyhow::anyhow!("bad SAN: {tok}"))?;
+                let mv = san
+                    .to_move(&pos)
+                    .map_err(|_| anyhow::anyhow!("illegal SAN: {tok}"))?;
+                pos.play_unchecked(&mv);
+            }
+        }
+        let fen = Fen::from_position(pos.clone(), Legal).to_string();
+        let stm = pos.turn();
+        Ok((
+            FenKey {
+                fen,
+                stm: PieceColor::from_shakmaty(stm),
+            },
+            stm,
+        ))
+    }
+
+    fn push_node(
+        &mut self,
+        parent: Option<u64>,
+        fen_key: &FenKey,
+        last_uci: Option<String>,
+        ply: u32,
+    ) -> RepertoireNode {
+        let id = self.nodes.len() as u64;
+        let node = RepertoireNode {
+            id,
+            parent,
+            fen_key: fen_key.clone(),
+            last_move_uci: last_uci,
+            ply_depth: ply,
+            children: Vec::new(),
+            signals: Default::default(),
+        };
+        self.nodes.push(node.clone());
+        node
+    }
+
+    async fn expand_node(
+        &mut self,
+        nid: u64,
+        max_plies: u32,
+        policy: &dyn MovePolicy,
+        quality: &Arc<dyn MoveQuality>,
+        popularity: &Arc<dyn MovePopularity>,
+        tx: &mpsc::Sender<u64>,
+    ) -> anyhow::Result<()> {
+        if (self.nodes[nid as usize].ply_depth) >= max_plies {
+            return Ok(());
+        }
+        let fen_key = self.nodes[nid as usize].fen_key.clone();
+        if !self.seen.insert(fen_key.clone()) {
+            return Ok(());
+        }
+
+        let mut req = CandidateRequest {
+            fen_key: fen_key.clone(),
+            max_candidates: 8,
+            cp_window: 50f32,
+            min_play_rate: 0.07,
+            multipv: 8,
+        };
+        let is_my_side = matches!(policy.decide(fen_key.stm.to_shakmaty()), Decision::Quality);
+        policy.adjust(&mut req, is_my_side);
+
+        // Fetch candidates
+        let mut cands = match policy.decide(fen_key.stm.to_shakmaty()) {
+            Decision::Quality => {
+                let evals = quality.evaluate(&req.fen_key, req.multipv).await?;
+                normalize_quality(&req.fen_key, evals)
+            }
+            Decision::Popularity => {
+                let rows = popularity.sample(&req.fen_key).await?;
+                normalize_popularity(&req.fen_key, rows)
+            }
+            Decision::Hybrid => {
+                // Future: shortlist via popularity then filter via quality
+                vec![]
+            }
+        };
+
+        // Post-filter + cap by side
+        cands = policy.post_filter(cands);
+        let cap = if is_my_side {
+            self.cfg.max_children_my_side
+        } else {
+            self.cfg.max_children_opp_side
+        };
+        cands.truncate(cap);
+
+        // Build children by applying UCI to get next FEN
+        for c in cands {
+            if let Some((next_fen, _stm)) = self.apply_uci(&fen_key, &c.uci).ok() {
+                let child = self.push_node(
+                    Some(nid),
+                    &next_fen,
+                    Some(c.uci.clone()),
+                    self.nodes[nid as usize].ply_depth + 1,
+                );
+                self.nodes[nid as usize].children.push(child.id);
+                tx.send(child.id).await.ok();
+            }
+        }
+        Ok(())
+    }
+
+    fn apply_uci(&self, fen_key: &FenKey, uci: &str) -> anyhow::Result<(FenKey, shakmaty::Color)> {
+        let pos: Chess = fen_key
+            .fen
+            .parse::<shakmaty::fen::Fen>()?
+            .into_position(Standard)?;
+        let u: Uci = uci.parse()?;
+        let m: shakmaty::Move = u
+            .to_move(&pos)
+            .or_else(|_| Err(anyhow::anyhow!("illegal UCI")))?;
+        let mut next = pos.clone();
+        next.play_unchecked(&m);
+        let next_fen = shakmaty::fen::Fen::from_position(next.clone(), Legal).to_string();
+        Ok((
+            FenKey {
+                fen: next_fen,
+                stm: PieceColor::from_shakmaty(next.turn()),
+            },
+            next.turn(),
+        ))
+    }
+}
+</file>
+
+<file path="src/cli.rs">
+use clap::Parser;
+
+/// CLI for building a repertoire PGN by composing quality and popularity providers.
+#[derive(Parser, Debug)]
+pub struct Cli {
+    /// Path to config TOML
+    #[arg(long, default_value = "config.toml")]
+    config: String,
+    /// Side for which to optimize (white|black)
+    #[arg(long)]
+    side: String,
+    /// Ply budget
+    #[arg(long)]
+    plies: u32,
+    /// Starting moves in SAN (e.g., "1.e4 e5 2.Nf3 Nc6")
+    #[arg(long)]
+    start: Option<String>,
+    /// Output PGN path
+    #[arg(long, default_value = "repertoire.pgn")]
+    out: String,
+}
+</file>
+
+<file path="src/config.rs">
+use serde::Deserialize;
+use std::fs;
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppConfig {
+    pub search: SearchCfg,
+    pub policy: PolicyCfg,
+    pub quality: QualityCfg,
+    pub popularity: PopularityCfg,
+    pub http: HttpCfg,
+    pub cache: CacheCfg,
+    pub rate: RateCfg,
+}
+
+impl AppConfig {
+    /// Load config from a TOML file.
+    pub fn load(path: &str) -> anyhow::Result<Self> {
+        let s = fs::read_to_string(path)?;
+        Ok(toml::from_str(&s)?)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SearchCfg {
+    pub concurrency: usize,
+    pub max_total_nodes: usize,
+    pub max_children_my_side: usize,
+    pub max_children_opp_side: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PolicyCfg {
+    pub my_side: Option<String>,
+    pub cp_window: i32,
+    pub min_play_rate: f32,
+}
+
+impl PolicyCfg {
+    pub fn resolve_side_override(&self, cli_side: &str) -> anyhow::Result<shakmaty::Color> {
+        let s = if !cli_side.is_empty() { Some(cli_side.to_string()) } else { self.my_side.clone() };
+        match s.as_deref() {
+            Some("white") => Ok(shakmaty::Color::White),
+            Some("black") => Ok(shakmaty::Color::Black),
+            _ => anyhow::bail!("side must be white|black"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct QualityCfg {
+    pub provider: String,            // "cloud_eval" for now
+    pub cloud_multi_pv: usize,
+    pub cloud_base_url: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PopularityCfg {
+    pub provider: String,            // "explorer" for now
+    pub base_url: String,
+    pub speed: String,
+    pub min_rating: u32,
+    pub max_rating: u32,
+    pub since_year: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct HttpCfg {
+    pub timeout_ms: u64,
+    pub retries: u32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CacheCfg {
+    pub entries: u64,
+    pub ttl_secs: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RateCfg {
+    pub cloud_per_sec: u32,
+    pub explorer_per_sec: u32,
+}
+</file>
+
+<file path="src/lib.rs">
+pub mod config;
+pub mod domain;
+pub mod policy;
+pub mod search;
+pub mod provider;
+pub mod infra;
+pub mod pgn;
+pub mod cli;
+
+pub use cli::Cli;
+</file>
+
+<file path="src/main.rs">
+use repgrow::{config::AppConfig, policy::SideSplitPolicy, provider, search::orchestrator::Orchestrator, pgn::writer::PgnWriter};
+use shakmaty::{Chess, san::San};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let cfg = AppConfig::load(&cli.config)?;
+
+    // Build infra
+    let infra = repgrow::infra::build_infra(&cfg)?;
+
+    // Build providers from config (factory)
+    let quality = provider::build_quality(&cfg.quality, &infra)?;
+    let popularity = provider::build_popularity(&cfg.popularity, &infra)?;
+
+    // Build policy (default: my side → quality; opp → popularity)
+    let my_side = cfg.policy.resolve_side_override(cli.side.as_str())?;
+    let policy = SideSplitPolicy::new(my_side, cfg.policy.cp_window, cfg.policy.min_play_rate);
+
+    // Orchestrator
+    let mut orch = Orchestrator::new(cfg.search.clone(), policy, quality, popularity, infra.clone());
+    let root = orch.build_from_start(cli.start.as_deref(), cli.plies).await?;
+
+    // Write PGN
+    let writer = PgnWriter::default();
+    let pgn = writer.write(&root)?;
+    std::fs::write(&cli.out, pgn)?;
+    eprintln!("Wrote {}", cli.out);
+    Ok(())
+}
+</file>
+
+<file path="tests/contract_popularity.rs">
+use repgrow::{provider::{MovePopularity, PopularityCaps}, domain::FenKey};
+
+struct DummyP;
+#[async_trait::async_trait]
+impl MovePopularity for DummyP {
+    async fn sample(&self, _fen: &FenKey) -> anyhow::Result<Vec<repgrow::domain::PopularityRow>> {
+        Ok(vec![
+            repgrow::domain::PopularityRow { uci: "e2e4".into(), play_rate: 0.55, games: 1000 },
+            repgrow::domain::PopularityRow { uci: "d2d4".into(), play_rate: 0.25, games: 600 },
+        ])
+    }
+    fn caps(&self) -> PopularityCaps { PopularityCaps { supports_filters: true } }
+}
+
+#[tokio::test]
+async fn popularity_returns_rows() {
+    let p = DummyP;
+    let fen = FenKey { fen: "startpos not real".into(), stm: shakmaty::Color::White };
+    let rows = p.sample(&fen).await.unwrap();
+    assert!(rows.iter().any(|r| r.play_rate > 0.0));
+}
+</file>
+
+<file path="tests/contract_quality.rs">
+use repgrow::{provider::{MoveQuality, modname::QualityCaps}, domain::{FenKey}};
+
+struct DummyQ;
+#[async_trait::async_trait]
+impl MoveQuality for DummyQ {
+    async fn evaluate(&self, _fen: &FenKey, _multipv: usize) -> anyhow::Result<Vec<repgrow::domain::EvalLine>> {
+        Ok(vec![
+            repgrow::domain::EvalLine { uci: "e2e4".into(), eval_cp: 30, depth: 20 },
+            repgrow::domain::EvalLine { uci: "d2d4".into(), eval_cp: 10, depth: 20 },
+        ])
+    }
+    fn caps(&self) -> modname::QualityCaps { modname::QualityCaps { max_multipv: 8 } }
+}
+
+#[tokio::test]
+async fn quality_returns_lines() {
+    let q = DummyQ;
+    let fen = FenKey { fen: "startpos not real".into(), stm: shakmaty::Color::White };
+    let lines = q.evaluate(&fen, 4).await.unwrap();
+    assert!(lines.len() >= 1);
+}
+</file>
+
+<file path="tests/pgn_golden.rs">
+#[test]
+fn pgn_writer_minimal() {
+    let writer = repgrow::pgn::writer::PgnWriter::default();
+    // Minimal fake node; in practice supply arena & real traversal.
+    let root = repgrow::domain::RepertoireNode {
+        id: 0, parent: None,
+        fen_key: repgrow::domain::FenKey { fen: "dummy".into(), stm: shakmaty::Color::White },
+        last_move_uci: None, ply_depth: 0, children: vec![], signals: Default::default()
+    };
+    let pgn = writer.write(&root).unwrap();
+    assert!(pgn.contains("[Event"));
+}
+</file>
+
+<file path=".gitignore">
+/target
+</file>
+
+<file path="Cargo.toml">
+[package]
+name = "repgrow"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+thiserror = "1"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+moka = { version = "0.12", features = ["future"] }
+dashmap = "6"
+governor = "0.6"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+shakmaty = { version = "0.24" }
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+
+[dev-dependencies]
+proptest = "1.4"
+</file>
+
+</files>
