@@ -1,5 +1,6 @@
 use crate::config::{AppConfig, CacheCfg, HttpCfg, RateCfg};
-use crate::infra::{cache::MemCache, rate::RateLimiter, singleflight::SingleFlight};
+use crate::infra::cache::MemCache;
+use crate::infra::{rate::RateLimiter, singleflight::SingleFlight};
 use std::sync::Arc;
 
 pub mod cache;

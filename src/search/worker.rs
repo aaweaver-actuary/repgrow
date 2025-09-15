@@ -39,7 +39,7 @@ pub async fn expand_node_task(
     let mut req = CandidateRequest {
         fen_key: fen_key.clone(),
         max_candidates: 8,
-        cp_window: 50,
+        cp_window: 50.0,
         min_play_rate: 0.07,
         multipv: 8,
     };
@@ -60,7 +60,7 @@ pub async fn expand_node_task(
     };
 
     // Post-filter + cap
-    cands = policy.post_filter(is_my_side, cands);
+    cands = policy.post_filter(cands);
     let cap = if is_my_side {
         cfg.max_children_my_side
     } else {
