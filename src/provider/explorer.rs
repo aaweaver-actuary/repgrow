@@ -7,9 +7,17 @@ use crate::{
 use async_trait::async_trait;
 
 /// Lichess Opening Explorer popularity provider.
+#[derive(Debug, Clone)]
+
 pub struct Explorer {
     cfg: PopularityConfig,
     infra: Infra,
+}
+
+impl Explorer {
+    pub fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Explorer")
+    }
 }
 
 impl Explorer {

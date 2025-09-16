@@ -4,7 +4,7 @@ use governor::{
 use std::{num::NonZeroU32, sync::Arc};
 
 /// Minimal rate-limiter interface.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RateLimiter {
     inner: Arc<GovLimiter<NotKeyed, InMemoryState, DefaultClock>>,
 }

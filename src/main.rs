@@ -1,13 +1,14 @@
+use clap_builder::Parser;
+use repgrow::pgn::RepertoireWriter;
 use repgrow::{
     cli::Cli,
     config::AppConfig,
     infra::build_infra,
     pgn::PgnWriter,
     policy::SideSplitPolicy,
-    provider::{self, build_popularity, build_quality},
+    provider::{build_popularity, build_quality},
     search::Orchestrator,
 };
-use shakmaty::{san::San, Chess};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

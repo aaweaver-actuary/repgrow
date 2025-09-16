@@ -27,7 +27,7 @@ use std::sync::Arc;
 /// Factory: late-bind providers from config.
 pub fn build_quality(cfg: &QualityConfig, _infra: &Infra) -> anyhow::Result<Arc<dyn MoveQuality>> {
     let client = build_lichess_eval_client(&cfg.base_url, cfg.multi_pv, cfg.clone());
-    match cfg.provider.as_str() {
+    match cfg.source.as_str() {
         "cloud_eval" => Ok(Arc::new(client)),
         other => anyhow::bail!("unknown quality provider '{other}'"),
     }

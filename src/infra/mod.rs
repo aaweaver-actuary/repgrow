@@ -10,7 +10,7 @@ pub mod scheduler;
 pub mod singleflight;
 
 /// Bundle of shared infra for providers/orchestrator.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Infra {
     pub cache_fen: Arc<MemCache<String, serde_json::Value>>, // example: cache raw blobs by FEN
     pub single: Arc<SingleFlight<String, serde_json::Value>>,

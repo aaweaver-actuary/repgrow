@@ -6,6 +6,7 @@ pub mod popularity_config;
 pub mod quality_config;
 pub mod rate_config;
 pub mod search_config;
+pub mod toml_utils;
 
 pub use app_config::AppConfig;
 pub use cache_config::CacheConfig;

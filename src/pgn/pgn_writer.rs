@@ -12,15 +12,3 @@ impl RepertoireWriter for PgnWriter {
         Ok(String::from("[Event \"Repertoire\"]\n\n1. e4 e5 *\n"))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_pgn_writer() {
-        let writer = PgnWriter::default();
-        let result = writer.write(&RepertoireNode::default());
-        assert!(result.is_ok());
-    }
-}

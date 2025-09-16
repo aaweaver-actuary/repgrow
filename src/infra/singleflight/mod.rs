@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 
 /// Simple single-flight coalescer to dedupe inflight requests per key.
+#[derive(Debug)]
 pub struct SingleFlight<K, V> {
     inflight: Mutex<HashMap<K, Vec<oneshot::Sender<Arc<V>>>>>,
 }

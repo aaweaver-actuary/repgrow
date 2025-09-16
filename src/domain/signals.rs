@@ -67,10 +67,11 @@ mod tests {
             games: Some(10),
         };
         let dbg = format!("{:?}", s);
+        println!("Results from the debug macro:\n{}", dbg);
         assert!(dbg.contains("Signals"));
         assert!(dbg.contains("eval_cp: Some(1.0)"));
         assert!(dbg.contains("depth: Some(2)"));
-        assert!(dbg.contains("play_rate: Some(0.5)"));
+        assert!(dbg.contains("play_rate: Some(PlayRate(0.5))"));
         assert!(dbg.contains("games: Some(10)"));
     }
 }

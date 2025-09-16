@@ -26,10 +26,10 @@ impl PlayRate {
     }
 
     /// Returns the play rate as a percentage (0 to 100), rounded to `round_to` decimal places and formatted as a String.
-    pub fn as_pct(&self, round_to: u32) -> String {
-        let factor = 10f32.powi(round_to as i32);
+    pub fn as_pct(&self) -> String {
+        let factor = 10f32.powi(2);
         let rounded = (self.0 * 100.0 * factor).round() / factor;
-        format!("{:.1}", rounded)
+        format!("{:}", rounded)
     }
 
     /// Returns GreaterThan, LessThan, or Equal to another PlayRate.
@@ -79,12 +79,11 @@ mod tests {
     #[test]
     fn test_play_rate_as_pct() {
         let pr = PlayRate::new(0.756);
-        assert_eq!(pr.as_pct(1), "75.6");
-        assert_eq!(pr.as_pct(2), "75.60");
+        assert_eq!(pr.as_pct(), "75.6");
         let pr2 = PlayRate::new(0.1);
-        assert_eq!(pr2.as_pct(0), "10");
+        assert_eq!(pr2.as_pct(), "10");
         let pr3 = PlayRate::new(0.999);
-        assert_eq!(pr3.as_pct(2), "99.90");
+        assert_eq!(pr3.as_pct(), "99.9");
     }
 
     #[test]

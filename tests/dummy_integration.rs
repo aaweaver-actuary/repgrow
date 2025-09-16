@@ -1,7 +1,8 @@
+use anyhow::Result;
 use repgrow::{
-    config::SearchCfg,
-    domain::{EvalLine, FenKey, PieceColor, PopularityRow},
-    policy::{Decision, MovePolicy, SideSplitPolicy},
+    config::SearchConfig,
+    domain::{EvalLine, FenKey, PopularityRow},
+    policy::SideSplitPolicy,
     provider::{MovePopularity, MoveQuality, PopularityCaps, QualityCaps},
     search::Orchestrator,
 };
@@ -10,7 +11,7 @@ use std::sync::Arc;
 struct DummyQ;
 #[async_trait::async_trait]
 impl MoveQuality for DummyQ {
-    async fn evaluate(&self, _fen: &FenKey, _multipv: usize) -> anyhow::Result<Vec<EvalLine>> {
+    async fn evaluate(&self, _fen: &FenKey, _multipv: Option<usize>) -> Result<Vec<EvalLine>> {
         Ok(vec![
             EvalLine {
                 uci: "e2e4".into(),
@@ -32,7 +33,7 @@ impl MoveQuality for DummyQ {
 struct DummyP;
 #[async_trait::async_trait]
 impl MovePopularity for DummyP {
-    async fn sample(&self, _fen: &FenKey) -> anyhow::Result<Vec<PopularityRow>> {
+    async fn sample(&self, _fen: &FenKey) -> Result<Vec<PopularityRow>> {
         Ok(vec![
             PopularityRow {
                 uci: "e7e5".into(),
@@ -56,11 +57,11 @@ impl MovePopularity for DummyP {
 #[tokio::test]
 async fn dispatcher_builds_two_plies() {
     // Constrain branching to keep the tree small & deterministic
-    let cfg = SearchCfg {
+    let cfg = SearchConfig {
         concurrency: 4,
-        max_total_nodes: 10000,
-        max_children_my_side: 1,
-        max_children_opp_side: 1,
+        max_total_nodes: Some(10),
+        max_children_my_side: Some(1),
+        max_children_opp_side: Some(1),
     };
     let policy = SideSplitPolicy::new(shakmaty::Color::White, 50, 0.05);
 

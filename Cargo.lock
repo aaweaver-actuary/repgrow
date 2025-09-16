@@ -1541,6 +1541,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
+ "clap_builder",
  "dashmap 6.1.0",
  "governor",
  "moka",
