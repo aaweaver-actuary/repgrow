@@ -10,6 +10,8 @@ pub struct CandidateMove {
 
 #[cfg(test)]
 mod tests {
+    use crate::domain::PlayRate;
+
     use super::*;
 
     #[test]
@@ -17,22 +19,28 @@ mod tests {
         let move_ = CandidateMove {
             uci: "e2e4".to_string(),
             next_fen: FenKey {
-                fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1".to_string(),
-                stm: crate::domain::PieceColor::Black,
+                fen_string: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+                    .to_string(),
+                side_to_move: crate::domain::PieceColor::Black,
             },
             signals: Signals {
-                popularity: 0.75,
-                quality: 0.85,
+                eval_cp: Some(0.85),
+                depth: None,
+                play_rate: Some(PlayRate::new(0.75)),
+                games: None,
             },
         };
 
         assert_eq!(move_.uci, "e2e4");
         assert_eq!(
-            move_.next_fen.fen,
+            move_.next_fen.fen_string,
             "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
         );
-        assert_eq!(move_.next_fen.stm, crate::domain::PieceColor::Black);
-        assert_eq!(move_.signals.popularity, 0.75);
-        assert_eq!(move_.signals.quality, 0.85);
+        assert_eq!(
+            move_.next_fen.side_to_move,
+            crate::domain::PieceColor::Black
+        );
+        assert_eq!(move_.signals.play_rate, Some(PlayRate::new(0.75)));
+        assert_eq!(move_.signals.eval_cp, Some(0.85));
     }
 }

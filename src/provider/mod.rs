@@ -1,47 +1,39 @@
 pub mod cloud_eval;
 pub mod explorer;
+pub mod move_popularity;
+pub mod move_quality;
 pub mod popularity;
 pub mod popularity_caps;
 pub mod quality;
 pub mod quality_caps;
 pub mod types;
 
-pub use cloud_eval::CloudEval;
+pub use cloud_eval::LichessEvalClient;
 pub use explorer::Explorer;
+pub use move_popularity::MovePopularity;
+pub use move_quality::MoveQuality;
 pub use popularity_caps::PopularityCaps;
 pub use quality_caps::QualityCaps;
 pub use types::CandidateMoves;
 
 use crate::{
-    config::{PopularityCfg, QualityCfg},
-    domain::{CandidateMove, EvalLine, FenKey, PopularityRow, Signals},
+    config::{PopularityConfig, QualityConfig},
+    domain::{CandidateMove, EvalLine, FenKey, PlayRate, PopularityRow, Signals},
     infra::Infra,
-    provider::types::EvalLines,
+    provider::{cloud_eval::build_lichess_eval_client, types::EvalLines},
 };
-use async_trait::async_trait;
 use std::sync::Arc;
 
-#[async_trait]
-pub trait MoveQuality: Send + Sync {
-    async fn evaluate(&self, fen: &FenKey, multipv: usize) -> anyhow::Result<Vec<EvalLine>>;
-    fn caps(&self) -> QualityCaps;
-}
-
-#[async_trait]
-pub trait MovePopularity: Send + Sync {
-    async fn sample(&self, fen: &FenKey) -> anyhow::Result<Vec<PopularityRow>>;
-    fn caps(&self) -> PopularityCaps;
-}
-
 /// Factory: late-bind providers from config.
-pub fn build_quality(cfg: &QualityCfg, infra: &Infra) -> anyhow::Result<Arc<dyn MoveQuality>> {
+pub fn build_quality(cfg: &QualityConfig, _infra: &Infra) -> anyhow::Result<Arc<dyn MoveQuality>> {
+    let client = build_lichess_eval_client(&cfg.base_url, cfg.multi_pv, cfg.clone());
     match cfg.provider.as_str() {
-        "cloud_eval" => Ok(Arc::new(CloudEval::new(cfg.clone(), infra.clone()))),
+        "cloud_eval" => Ok(Arc::new(client)),
         other => anyhow::bail!("unknown quality provider '{other}'"),
     }
 }
 pub fn build_popularity(
-    cfg: &PopularityCfg,
+    cfg: &PopularityConfig,
     infra: &Infra,
 ) -> anyhow::Result<Arc<dyn MovePopularity>> {
     match cfg.provider.as_str() {
@@ -71,7 +63,7 @@ pub fn normalize_popularity(fen: &FenKey, rows: Vec<PopularityRow>) -> Candidate
     rows.into_iter()
         .map(|r| {
             let mut sig = Signals::default();
-            sig.play_rate = Some(r.play_rate);
+            sig.play_rate = Some(PlayRate::new(r.play_rate));
             sig.games = Some(r.games);
             CandidateMove {
                 uci: r.uci,

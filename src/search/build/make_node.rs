@@ -1,6 +1,6 @@
 use crate::domain::{FenKey, RepertoireNode};
 
-/// Create a node struct (id assigned by arena)
+/// Make a node (id set by arena)
 pub fn make_node(
     parent: Option<u64>,
     fen_key: &FenKey,
@@ -8,7 +8,7 @@ pub fn make_node(
     ply: u32,
 ) -> RepertoireNode {
     RepertoireNode {
-        id: 0, // arena will set real id
+        id: 0,
         parent,
         fen_key: fen_key.clone(),
         last_move_uci: last_uci,

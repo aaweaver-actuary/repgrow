@@ -1,4 +1,4 @@
-use crate::config::{AppConfig, CacheCfg, HttpCfg, RateCfg};
+use crate::config::AppConfig;
 use crate::infra::cache::MemCache;
 use crate::infra::{rate::RateLimiter, singleflight::SingleFlight};
 use std::sync::Arc;

@@ -4,3 +4,5 @@ pub mod dispatcher;
 pub mod orchestrator;
 pub mod util;
 pub mod worker;
+
+pub use dispatcher::Orchestrator;

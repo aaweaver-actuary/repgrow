@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::hash::Hash;
 use std::sync::Arc;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 
 /// Simple single-flight coalescer to dedupe inflight requests per key.
 pub struct SingleFlight<K, V> {
@@ -10,8 +10,14 @@ pub struct SingleFlight<K, V> {
 }
 
 impl<K, V> SingleFlight<K, V>
-where K: Eq + Hash + Clone {
-    pub fn new() -> Self { Self { inflight: Mutex::new(HashMap::new()) } }
+where
+    K: Eq + Hash + Clone,
+{
+    pub fn new() -> Self {
+        Self {
+            inflight: Mutex::new(HashMap::new()),
+        }
+    }
 
     /// Run f once for key k; concurrent callers await same result.
     pub async fn run<F, Fut>(&self, k: K, f: F) -> anyhow::Result<Arc<V>>
@@ -43,10 +49,13 @@ where K: Eq + Hash + Clone {
         };
         match &res {
             Ok(v) => {
-                for w in waiters { let _ = w.send(v.clone()); }
+                for w in waiters {
+                    let _ = w.send(v.clone());
+                }
             }
             Err(_) => {
-                for w in waiters { let _ = w.send(Arc::new(panic!("no value"))); }
+                // Do not send anything to waiters on error, or optionally send a default value if appropriate.
+                // for w in waiters { let _ = w.send(Arc::new(panic!("no value"))); }
             }
         }
         res

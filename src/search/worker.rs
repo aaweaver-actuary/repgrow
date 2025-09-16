@@ -1,6 +1,6 @@
 use super::{arena::NodeArenaStore, util::apply_uci};
 use crate::{
-    config::SearchCfg,
+    config::SearchConfig,
     domain::{CandidateRequest, FenKey, RepertoireNode},
     policy::{Decision, MovePolicy},
     provider::{normalize_popularity, normalize_quality, MovePopularity, MoveQuality},
@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 pub async fn expand_node_task(
     nid: u64,
     max_plies: u32,
-    cfg: &SearchCfg,
+    cfg: &SearchConfig,
     policy: &dyn MovePolicy,
     quality: &Arc<dyn MoveQuality>,
     popularity: &Arc<dyn MovePopularity>,
@@ -44,12 +44,12 @@ pub async fn expand_node_task(
         multipv: 8,
     };
 
-    let is_my_side = matches!(policy.decide(fen_key.stm.to_shakmaty()), Decision::Quality);
+    let is_my_side = matches!(policy.decide(fen_key.side_to_move.to_shakmaty()), Decision::Quality);
     policy.adjust(&mut req, is_my_side);
 
-    let mut cands = match policy.decide(fen_key.stm.to_shakmaty()) {
+    let mut cands = match policy.decide(fen_key.side_to_move.to_shakmaty()) {
         Decision::Quality => {
-            let evals = quality.evaluate(&req.fen_key, req.multipv).await?;
+            let evals = quality.evaluate(&req.fen_key, Some(req.multipv)).await?;
             normalize_quality(&req.fen_key, evals)
         }
         Decision::Popularity => {
@@ -66,7 +66,7 @@ pub async fn expand_node_task(
     } else {
         cfg.max_children_opp_side
     };
-    cands.truncate(cap);
+    cands.truncate(cap.expect("max_children should be set"));
 
     // Apply moves → create children → enqueue
     let mut child_ids = Vec::with_capacity(cands.len());

@@ -1,1 +1,6 @@
 /target
+src/search/orchestrator.rs
+repomix.config.json
+repomix-output.xml
+.repomixignore
+Cargo.lock

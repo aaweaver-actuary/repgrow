@@ -1,3 +1,21 @@
+use crate::domain::PlayRate;
+
+/// Signals union carried by candidates; expandable without changing traits.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Signals {
+    /// Centipawn evaluation from engine analysis, positive for White, negative for Black. None if no evaluation available.
+    pub eval_cp: Option<f32>,
+
+    /// Depth of the engine analysis that produced eval_cp. None if no analysis available.
+    pub depth: Option<u8>,
+
+    /// Play rate of this move in the given position, as a fraction between 0.0 and 1.0. None if no data available.
+    pub play_rate: Option<PlayRate>,
+
+    /// Number of games played in this position. None if no data available.
+    pub games: Option<u32>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -16,12 +34,12 @@ mod tests {
         let s = Signals {
             eval_cp: Some(42.5),
             depth: Some(12),
-            play_rate: Some(0.8),
+            play_rate: Some(PlayRate::new(0.8)),
             games: Some(100),
         };
         assert_eq!(s.eval_cp, Some(42.5));
         assert_eq!(s.depth, Some(12));
-        assert_eq!(s.play_rate, Some(0.8));
+        assert_eq!(s.play_rate, Some(PlayRate::new(0.8)));
         assert_eq!(s.games, Some(100));
     }
 
@@ -45,7 +63,7 @@ mod tests {
         let s = Signals {
             eval_cp: Some(1.0),
             depth: Some(2),
-            play_rate: Some(0.5),
+            play_rate: Some(PlayRate::new(0.5)),
             games: Some(10),
         };
         let dbg = format!("{:?}", s);
@@ -55,12 +73,4 @@ mod tests {
         assert!(dbg.contains("play_rate: Some(0.5)"));
         assert!(dbg.contains("games: Some(10)"));
     }
-}
-/// Signals union carried by candidates; expandable without changing traits.
-#[derive(Clone, Debug, Default)]
-pub struct Signals {
-    pub eval_cp: Option<f32>,
-    pub depth: Option<u8>,
-    pub play_rate: Option<f32>,
-    pub games: Option<u32>,
 }

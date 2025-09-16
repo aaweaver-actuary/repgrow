@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PieceColor {
@@ -34,5 +35,11 @@ impl PieceColor {
             shakmaty::Color::White => PieceColor::White,
             shakmaty::Color::Black => PieceColor::Black,
         }
+    }
+}
+
+impl Display for PieceColor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }
