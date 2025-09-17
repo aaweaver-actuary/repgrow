@@ -13,7 +13,6 @@ my_side      ="white" # overridden by CLI --side if provided
 
 [quality]
 base_url      ="https://lichess.org/api/cloud-eval"
-cloud_multi_pv=8
 multi_pv      =4                                    # how many lines to request from engine
 source        ="cloud"                              # only "cloud" for now (local UCI later)
 
@@ -21,8 +20,8 @@ source        ="cloud"                              # only "cloud" for now (loca
 base_url  ="https://explorer.lichess.ovh/lichess"
 max_rating=2000
 min_rating=800
-provider  ="explorer"
 since_year=2019
+source    ="explorer"
 speed     ="all"                                  # or "rapid", "classical", "all"
 variant   ="standard"
 

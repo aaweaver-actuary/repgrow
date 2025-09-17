@@ -1,19 +1,19 @@
 use shakmaty::Color;
 
 use crate::{
-    domain::CandidateRequest,
+    domain::{CandidateRequest, Centipawns, PlayRate},
     policy::{Decision, MovePolicy},
 };
 
 /// Default: my side → quality (engine); opponent → popularity (explorer)
 pub struct SideSplitPolicy {
     my_side: Color,
-    cp_window: i32,
-    min_play_rate: f32,
+    cp_window: Centipawns,
+    min_play_rate: PlayRate,
 }
 
 impl SideSplitPolicy {
-    pub fn new(my_side: Color, cp_window: i32, min_play_rate: f32) -> Self {
+    pub fn new(my_side: Color, cp_window: Centipawns, min_play_rate: PlayRate) -> Self {
         Self {
             my_side,
             cp_window,
@@ -32,9 +32,9 @@ impl MovePolicy for SideSplitPolicy {
     }
     fn adjust(&self, req: &mut CandidateRequest, is_my_side: bool) {
         if is_my_side {
-            req.cp_window = self.cp_window as f32;
+            req.cp_window = self.cp_window;
         } else {
-            req.min_play_rate = self.min_play_rate as f32;
+            req.min_play_rate = self.min_play_rate;
         }
     }
 }

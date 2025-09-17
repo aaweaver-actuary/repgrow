@@ -36,7 +36,7 @@ pub fn build_popularity(
     cfg: &PopularityConfig,
     infra: &Infra,
 ) -> anyhow::Result<Arc<dyn MovePopularity>> {
-    match cfg.provider.as_str() {
+    match cfg.source.as_str() {
         "explorer" => Ok(Arc::new(Explorer::new(cfg.clone(), infra.clone()))),
         other => anyhow::bail!("unknown popularity provider '{other}'"),
     }
@@ -59,12 +59,17 @@ pub fn normalize_quality(fen: &FenKey, lines: EvalLines) -> CandidateMoves {
         })
         .collect()
 }
+
 pub fn normalize_popularity(fen: &FenKey, rows: Vec<PopularityRow>) -> CandidateMoves {
     rows.into_iter()
         .map(|r| {
-            let mut sig = Signals::default();
-            sig.play_rate = Some(PlayRate::new(r.play_rate));
-            sig.games = Some(r.games);
+            let playrate = Some(PlayRate::new(r.play_rate));
+            let games = Some(r.games);
+            let sig = Signals {
+                play_rate: playrate,
+                games,
+                ..Default::default()
+            };
             CandidateMove {
                 uci: r.uci,
                 next_fen: fen.clone(),

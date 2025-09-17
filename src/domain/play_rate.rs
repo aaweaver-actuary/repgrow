@@ -1,16 +1,43 @@
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
 /// Wrapper type for play rate as a float between 0.0 and 1.0.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlayRate(pub f32);
 
 impl PlayRate {
     /// Creates a new PlayRate, ensuring the value is clamped between 0.0 and 1.0.
+    /// # Arguments
+    /// * `rate` - The play rate as a float.
+    /// # Returns
+    /// * `PlayRate` - A new PlayRate instance.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PlayRate;
+    /// let pr = PlayRate::new(0.75);
+    /// assert_eq!(pr.as_f32(), 0.75);
+    /// let pr_low = PlayRate::new(-0.5);
+    /// assert_eq!(pr_low.as_f32(), 0.0);
+    /// let pr_high = PlayRate::new(1.5);
+    /// assert_eq!(pr_high.as_f32(), 1.0);
+    /// let pr_valid = PlayRate::new(0.5);
+    /// assert_eq!(pr_valid.as_f32(), 0.5);
+    /// assert_eq!(pr_valid.as_float(), 0.5);
+    /// assert_eq!(pr_valid.value(), 0.5);
+    /// ```
     pub fn new(rate: f32) -> Self {
         PlayRate(rate.clamp(0.0, 1.0))
     }
 
     /// Returns the inner float value.
+    /// # Returns
+    /// * `f32` - The play rate as a float.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PlayRate;
+    /// let pr = PlayRate::new(0.33);
+    /// assert_eq!(pr.as_f32(), 0.33);
+    /// ```
     pub fn as_f32(&self) -> f32 {
         self.0
     }

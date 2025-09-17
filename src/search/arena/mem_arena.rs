@@ -15,6 +15,11 @@ impl MemArena {
             inner: Arc::new(Mutex::new(Vec::new())),
         }
     }
+    /// Returns a clone of all nodes currently in the arena.
+    pub async fn all_nodes(&self) -> Vec<RepertoireNode> {
+        let g = self.inner.lock().await;
+        g.clone()
+    }
 }
 
 #[async_trait::async_trait]

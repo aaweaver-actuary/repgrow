@@ -1,7 +1,7 @@
 use super::{arena::NodeArenaStore, util::apply_uci};
 use crate::{
     config::SearchConfig,
-    domain::{CandidateRequest, FenKey, RepertoireNode},
+    domain::{CandidateRequest, Centipawns, FenKey, PlayRate, RepertoireNode},
     policy::{Decision, MovePolicy},
     provider::{normalize_popularity, normalize_quality, MovePopularity, MoveQuality},
 };
@@ -39,12 +39,15 @@ pub async fn expand_node_task(
     let mut req = CandidateRequest {
         fen_key: fen_key.clone(),
         max_candidates: 8,
-        cp_window: 50.0,
-        min_play_rate: 0.07,
+        cp_window: Centipawns::from_int(50),
+        min_play_rate: PlayRate::new(0.01),
         multipv: 8,
     };
 
-    let is_my_side = matches!(policy.decide(fen_key.side_to_move.to_shakmaty()), Decision::Quality);
+    let is_my_side = matches!(
+        policy.decide(fen_key.side_to_move.to_shakmaty()),
+        Decision::Quality
+    );
     policy.adjust(&mut req, is_my_side);
 
     let mut cands = match policy.decide(fen_key.side_to_move.to_shakmaty()) {

@@ -27,13 +27,13 @@ async fn main() -> anyhow::Result<()> {
     let policy = SideSplitPolicy::new(my_side, cfg.policy.cp_window, cfg.policy.min_play_rate);
 
     // Orchestrator
-    let mut orch = Orchestrator::new(cfg.search.clone(), policy, quality, popularity);
+    let orch = Orchestrator::new(cfg.search.clone(), policy, quality, popularity);
     let root = orch
         .build_from_start(cli.start.as_deref(), cli.plies)
         .await?;
 
     // Write PGN
-    let writer = PgnWriter::default();
+    let writer = PgnWriter;
     let pgn = writer.write(&root)?;
     std::fs::write(&cli.out, pgn)?;
     eprintln!("Wrote {}", cli.out);

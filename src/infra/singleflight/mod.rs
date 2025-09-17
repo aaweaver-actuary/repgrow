@@ -62,3 +62,12 @@ where
         res
     }
 }
+
+impl<K, V> Default for SingleFlight<K, V>
+where
+    K: Eq + Hash + Clone,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -16,3 +16,4 @@ pub use popularity_config::PopularityConfig;
 pub use quality_config::QualityConfig;
 pub use rate_config::RateConfig;
 pub use search_config::SearchConfig;
+pub use toml_utils::{load_config_type_from_file, load_default_config, load_toml_from_file};

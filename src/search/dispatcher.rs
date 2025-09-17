@@ -86,4 +86,8 @@ impl Orchestrator {
 
         Ok(root)
     }
+    /// Returns a clone of all nodes in the arena (for testing/inspection).
+    pub async fn all_nodes(&self) -> Vec<crate::domain::RepertoireNode> {
+        self.arena.all_nodes().await
+    }
 }

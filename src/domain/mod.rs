@@ -1,5 +1,6 @@
 pub mod candidate_move;
 pub mod candidate_request;
+pub mod centipawns;
 pub mod color;
 pub mod eval_line;
 pub mod fen_key;
@@ -10,6 +11,7 @@ pub mod signals;
 
 pub use candidate_move::CandidateMove;
 pub use candidate_request::CandidateRequest;
+pub use centipawns::Centipawns;
 pub use color::PieceColor;
 pub use eval_line::EvalLine;
 pub use fen_key::FenKey;

@@ -29,6 +29,6 @@ pub fn build_infra(cfg: &AppConfig) -> anyhow::Result<Infra> {
         rate_cloud: RateLimiter::per_sec(cfg.rate.cloud_per_sec),
         rate_explorer: RateLimiter::per_sec(cfg.rate.explorer_per_sec),
         http: http::build_http(cfg.http.timeout_ms),
-        sched: scheduler::TokioScheduler::default(),
+        sched: scheduler::TokioScheduler,
     })
 }
