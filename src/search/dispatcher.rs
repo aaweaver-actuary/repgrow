@@ -12,6 +12,7 @@ use crate::{
 use dashmap::DashSet;
 use std::sync::Arc;
 use tokio::{sync::mpsc, task::JoinSet};
+use tracing::{debug, info};
 
 /// Orchestrator: drains the work queue (single consumer) and spawns a worker per item.
 pub struct Orchestrator {
@@ -47,8 +48,14 @@ impl Orchestrator {
         san_line: Option<&str>,
         max_plies: u32,
     ) -> anyhow::Result<RepertoireNode> {
+        info!(
+            "Orchestrator: build_from_start called with san_line={:?}, max_plies={}",
+            san_line, max_plies
+        );
         let (root_fen, _stm) = start_from_san(san_line)?;
+        debug!("Root FEN: {:?}", root_fen);
         let root_id = self.arena.push(make_node(None, &root_fen, None, 0)).await;
+        debug!("Root node pushed with id: {}", root_id);
         let root = self.arena.get(root_id).await.expect("root in arena");
 
         let (tx, mut rx) = mpsc::channel::<u64>(self.cfg.concurrency * 4);
@@ -57,6 +64,7 @@ impl Orchestrator {
         let mut joinset = JoinSet::new();
 
         while let Some(nid) = rx.recv().await {
+            debug!("Dequeued node id: {} for expansion", nid);
             let tx2 = tx.clone();
             let cfg2 = self.cfg.clone();
             let policy2 = Arc::clone(&self.policy);
@@ -66,6 +74,7 @@ impl Orchestrator {
             let arena_ref = self.arena.clone();
 
             joinset.spawn(async move {
+                debug!("Worker spawned for node id: {}", nid);
                 let _ = expand_node_task(
                     nid,
                     max_plies,
@@ -78,11 +87,14 @@ impl Orchestrator {
                     &tx2,
                 )
                 .await;
+                debug!("Worker finished for node id: {}", nid);
             });
         }
 
         // Sender dropped → wait for all in-flight workers to finish
+        info!("Waiting for all workers to finish...");
         while let Some(_res) = joinset.join_next().await {}
+        info!("All workers finished. Returning root node.");
 
         Ok(root)
     }

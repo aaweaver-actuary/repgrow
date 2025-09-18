@@ -5,8 +5,8 @@ use clap::Parser;
 #[command(version, about, long_about = None)]
 pub struct Cli {
     /// Path to config TOML
-    #[arg(long, default_value = "config.toml")]
-    pub config: String,
+    #[arg(long, default_value = "src/config/default_config.toml")]
+    pub config: Option<String>,
     /// Side for which to optimize (white|black)
     #[arg(long)]
     pub side: String,

@@ -1,7 +1,7 @@
 use crate::domain::{FenKey, PieceColor};
-use anyhow::{anyhow, Error, Result};
+use anyhow::{Error, Result, anyhow};
 use shakmaty::CastlingMode;
-use shakmaty::{fen::Fen, uci::Uci, Chess, EnPassantMode, Position};
+use shakmaty::{Chess, EnPassantMode, Position, fen::Fen, uci::Uci};
 
 pub fn apply_uci(fen_key: &FenKey, uci: &str) -> Result<(FenKey, shakmaty::Color)> {
     let position: Chess = extract_position_from_fen_key(fen_key)?;
@@ -23,11 +23,10 @@ pub fn extract_move_from_parsed_uci_and_position(
     uci: &str,
     position: &Chess,
 ) -> Result<shakmaty::Move, Error> {
-    Ok(uci
-        .parse::<Uci>()
+    uci.parse::<Uci>()
         .map_err(|_| anyhow!("bad UCI"))?
         .to_move(position)
-        .map_err(|_| anyhow!("illegal UCI"))?)
+        .map_err(|_| anyhow!("illegal UCI"))
 }
 
 pub fn extract_position_from_fen_key(fen_key: &FenKey) -> Result<Chess, Error> {

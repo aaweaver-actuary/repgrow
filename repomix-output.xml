@@ -44,6 +44,7 @@ src/
   config/
     app_config.rs
     cache_config.rs
+    default_config.toml
     http_config.rs
     mod.rs
     policy_config.rs
@@ -51,9 +52,18 @@ src/
     quality_config.rs
     rate_config.rs
     search_config.rs
+    toml_utils.rs
   domain/
+    chess/
+      chess_file.rs
+      chess_piece_type.rs
+      chess_rank.rs
+      chess_square.rs
+      mod.rs
+      uci_move.rs
     candidate_move.rs
     candidate_request.rs
+    centipawns.rs
     color.rs
     eval_line.rs
     fen_key.rs
@@ -62,6 +72,7 @@ src/
     popularity_row.rs
     repertoire_node.rs
     signals.rs
+    uci.rs
   infra/
     cache/
       kv_cache.rs
@@ -77,6 +88,7 @@ src/
       mod.rs
     mod.rs
   pgn/
+    json_writer.rs
     mod.rs
     pgn_writer.rs
     repertoire_writer.rs
@@ -105,153 +117,72 @@ src/
       make_node.rs
       mod.rs
       start_from_san.rs
+    dispatcher.rs
     mod.rs
-    orchestrator.rs
     util.rs
     worker.rs
   cli.rs
   lib.rs
   main.rs
 tests/
-  contract_popularity.rs
-  contract_quality.rs
-  pgn_golden.rs
+  dummy_cli_integration.rs
+  dummy_integration.rs
 .gitignore
 Cargo.toml
+Makefile
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
 
-<file path="src/config/app_config.rs">
-use std::fs;
+<file path="tests/dummy_cli_integration.rs">
+use once_cell::sync::OnceCell;
 
-use serde::Deserialize;
+static LOG_INIT: OnceCell<()> = OnceCell::new();
+#[test]
+fn cli_finds_white_moves_after_1e4_e5_2nf3_nc6() {
+    LOG_INIT.get_or_init(|| {
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .init();
+    });
+    use assert_cmd::Command;
+    use std::fs;
+    use tempfile::NamedTempFile;
 
-use crate::config::{
-    CacheConfig, HttpConfig, PolicyConfig, PopularityConfig, QualityConfig, RateConfig,
-    SearchConfig,
-};
+    let out_file = NamedTempFile::new().unwrap();
+    let out_path = out_file.path().to_str().unwrap();
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct AppConfig {
-    pub search: SearchConfig,
-    pub policy: PolicyConfig,
-    pub quality: QualityConfig,
-    pub popularity: PopularityConfig,
-    pub http: HttpConfig,
-    pub cache: CacheConfig,
-    pub rate: RateConfig,
-}
+    // Run the CLI
+    Command::cargo_bin("repgrow")
+        .unwrap()
+        .args([
+            "--start",
+            "1. e4 e5 2. Nf3 Nc6",
+            "--plies",
+            "1",
+            "--side",
+            "white",
+            "--out",
+            // out_path,
+            "repgrow.pgn",
+        ])
+        .assert()
+        .success();
 
-impl AppConfig {
-    /// Load config from a TOML file.
-    pub fn load(path: &str) -> anyhow::Result<Self> {
-        let s = fs::read_to_string(path)?;
-        Ok(toml::from_str(&s)?)
-    }
-}
-</file>
-
-<file path="src/config/cache_config.rs">
-use serde::Deserialize;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct CacheConfig {
-    pub entries: u64,
-    pub ttl_secs: u64,
-}
-</file>
-
-<file path="src/config/http_config.rs">
-use serde::Deserialize;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct HttpConfig {
-    pub timeout_ms: u64,
-    pub retries: u32,
+    // Read and parse the PGN
+    let pgn = fs::read_to_string(out_path).unwrap();
+    assert!(pgn.contains("1.e4 e5 2.Nf3 Nc6"));
+    assert!(pgn.contains("3.Bb5") || pgn.contains("3.Bc4") || pgn.contains("3.d4"));
 }
 </file>
 
-<file path="src/config/mod.rs">
-pub mod app_config;
-pub mod cache_config;
-pub mod http_config;
-pub mod policy_config;
-pub mod popularity_config;
-pub mod quality_config;
-pub mod rate_config;
-pub mod search_config;
+<file path="Makefile">
+test:
+	RUST_LOG=debug cargo test
 
-pub use app_config::AppConfig;
-pub use cache_config::CacheConfig;
-pub use http_config::HttpConfig;
-pub use policy_config::PolicyConfig;
-pub use popularity_config::PopularityConfig;
-pub use quality_config::QualityConfig;
-pub use rate_config::RateConfig;
-pub use search_config::SearchConfig;
-</file>
-
-<file path="src/config/policy_config.rs">
-use serde::Deserialize;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PolicyConfig {
-    pub my_side: Option<String>,
-    pub cp_window: i32,
-    pub min_play_rate: f32,
-}
-
-impl PolicyConfig {
-    pub fn resolve_side_override(&self, cli_side: &str) -> anyhow::Result<shakmaty::Color> {
-        let s = if !cli_side.is_empty() {
-            Some(cli_side.to_string())
-        } else {
-            self.my_side.clone()
-        };
-        match s.as_deref() {
-            Some("white") => Ok(shakmaty::Color::White),
-            Some("black") => Ok(shakmaty::Color::Black),
-            _ => anyhow::bail!("side must be white|black"),
-        }
-    }
-}
-</file>
-
-<file path="src/config/popularity_config.rs">
-use serde::Deserialize;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct PopularityConfig {
-    pub provider: String, // "explorer" for now
-    pub base_url: String,
-    pub speed: String,
-    pub min_rating: u32,
-    pub max_rating: u32,
-    pub since_year: u32,
-}
-</file>
-
-<file path="src/config/quality_config.rs">
-use serde::Deserialize;
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct QualityConfig {
-    pub provider: String, // "cloud_eval" for now
-    pub multi_pv: usize,
-    pub base_url: String,
-}
-
-impl Default for QualityConfig {
-    fn default() -> Self {
-        Self {
-            provider: "cloud_eval".to_string(),
-            multi_pv: 5,
-            base_url: "https://lichess.org/api/cloud-eval".to_string(),
-        }
-    }
-}
+lint:
+	cargo clippy --all-targets --all-features -- -D warnings
 </file>
 
 <file path="src/config/rate_config.rs">
@@ -291,165 +222,187 @@ impl Default for SearchConfig {
 }
 </file>
 
-<file path="src/domain/eval_line.rs">
+<file path="src/domain/chess/uci_move.rs">
+use crate::domain::chess::{ChessPieceType, ChessSquare};
 use serde::{Deserialize, Serialize};
 
-/// Convenience struct returned by specialized providers before normalization.
-/// EvalLine represents a single move evaluation from a chess engine.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EvalLine {
-    pub uci: String,
-    pub eval_cp: i32,
-    pub depth: u8,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UciMove {
+    pub from: ChessSquare,
+    pub to: ChessSquare,
+    pub promotion: Option<ChessPieceType>,
 }
-</file>
 
-<file path="src/domain/play_rate.rs">
-use std::cmp::Ordering;
+/// Error type for UCI move parsing failures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UciMoveParseError;
 
-/// Wrapper type for play rate as a float between 0.0 and 1.0.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PlayRate(pub f32);
-
-impl PlayRate {
-    /// Creates a new PlayRate, ensuring the value is clamped between 0.0 and 1.0.
-    pub fn new(rate: f32) -> Self {
-        PlayRate(rate.clamp(0.0, 1.0))
-    }
-
-    /// Returns the inner float value.
-    pub fn as_f32(&self) -> f32 {
-        self.0
-    }
-
-    /// Alias for as_f32.
-    pub fn as_float(&self) -> f32 {
-        self.as_f32()
-    }
-
-    /// Alias for as_f32.
-    pub fn value(&self) -> f32 {
-        self.as_f32()
-    }
-
-    /// Returns the play rate as a percentage (0 to 100), rounded to `round_to` decimal places and formatted as a String.
-    pub fn as_pct(&self, round_to: u32) -> String {
-        let factor = 10f32.powi(round_to as i32);
-        let rounded = (self.0 * 100.0 * factor).round() / factor;
-        format!("{:.1}", rounded)
-    }
-
-    /// Returns GreaterThan, LessThan, or Equal to another PlayRate.
-    pub fn compare(&self, other: &PlayRate) -> Ordering {
-        let value1 = self.0;
-        let value2 = other.0;
-        if value1 < value2 {
-            Ordering::Less
-        } else if value1 > value2 {
-            Ordering::Greater
-        } else {
-            Ordering::Equal
+impl UciMove {
+    /// Creates a new UciMove.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{UciMove, ChessSquare, ChessFile, ChessRank, ChessPieceType};
+    /// let from_sq = ChessSquare::new(ChessFile::E, ChessRank::Two);
+    /// let to_sq = ChessSquare::new(ChessFile::E, ChessRank::Four);
+    /// let uci_move = UciMove::new(from_sq, to_sq, None);
+    /// assert_eq!(uci_move.from, from_sq);
+    /// assert_eq!(uci_move.to, to_sq);
+    /// assert_eq!(uci_move.promotion, None);
+    /// ```
+    pub fn new(from: ChessSquare, to: ChessSquare, promotion: Option<ChessPieceType>) -> Self {
+        Self {
+            from,
+            to,
+            promotion,
         }
     }
-}
 
-impl Default for PlayRate {
-    fn default() -> Self {
-        PlayRate(0.0)
+    /// Parses a UCI move string (e.g., "e2e4", "e7e8q") into a `UciMove`.
+    ///
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{UciMove, ChessSquare, ChessFile, ChessRank, ChessPieceType};
+    /// use repgrow::domain::chess::uci_move::UciMoveParseError;
+    /// let from_sq = ChessSquare::from_coords("e2").unwrap();
+    /// let to_sq = ChessSquare::from_coords("e4").unwrap();
+    /// let uci_move = UciMove::new(from_sq, to_sq, None);
+    /// assert_eq!(UciMove::from_uci("e2e4"), Ok(uci_move));
+    /// assert_eq!(UciMove::from_uci("e7e8q"), Ok(UciMove {
+    ///     from: ChessSquare::new(ChessFile::E, ChessRank::Seven),
+    ///     to: ChessSquare::new(ChessFile::E, ChessRank::Eight),
+    ///     promotion: Some(ChessPieceType::Queen),
+    /// }));
+    /// assert_eq!(UciMove::from_uci("a7a8n"), Ok(UciMove {
+    ///     from: ChessSquare::new(ChessFile::A, ChessRank::Seven),
+    ///     to: ChessSquare::new(ChessFile::A, ChessRank::Eight),
+    ///     promotion: Some(ChessPieceType::Knight),
+    /// }));
+    /// ```
+    pub fn from_uci(s: &str) -> Result<Self, UciMoveParseError> {
+        if s.len() < 4 || s.len() > 5 {
+            return Err(UciMoveParseError);
+        }
+        let from_square =
+            ChessSquare::extract_uci_from_square(s).expect("Failed to extract from square");
+        let to_square = ChessSquare::extract_uci_to_square(s).expect("Failed to extract to square");
+        let promotion_piece = ChessPieceType::from_uci_string(s);
+
+        // Validate promotion rules
+        if let Some(promo) = promotion_piece {
+            // Promotion can only occur when moving to the last rank
+            let is_white_pawn = from_square.rank().to_int() == 7 && to_square.rank().to_int() == 8;
+            let is_black_pawn = from_square.rank().to_int() == 2 && to_square.rank().to_int() == 1;
+            let is_pawn_promotion = is_white_pawn || is_black_pawn;
+            if !is_pawn_promotion {
+                let err_msg = format!(
+                    "Invalid promotion move: {:?} to {:?} with promotion to {:?}.\nPromotion can only occur when a pawn reaches the last rank, so it must start from one rank before.",
+                    from_square.to_coords(),
+                    to_square.to_coords(),
+                    promo
+                );
+                eprintln!("{}", err_msg);
+                return Err(UciMoveParseError);
+            }
+
+            // Ensure the piece being promoted to is valid
+            match promo {
+                ChessPieceType::Queen
+                | ChessPieceType::Rook
+                | ChessPieceType::Bishop
+                | ChessPieceType::Knight => {}
+                _ => return Err(UciMoveParseError),
+            }
+
+            Ok(UciMove::new(from_square, to_square, Some(promo)))
+        } else {
+            Ok(UciMove::new(from_square, to_square, None))
+        }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_play_rate_creation() {
-        let pr = PlayRate::new(0.75);
-        assert_eq!(pr.as_f32(), 0.75);
-        assert_eq!(pr.as_float(), 0.75);
-        assert_eq!(pr.value(), 0.75);
-    }
-
-    #[test]
-    fn test_play_rate_clamping() {
-        let pr_low = PlayRate::new(-0.5);
-        assert_eq!(pr_low.as_f32(), 0.0);
-        let pr_high = PlayRate::new(1.5);
-        assert_eq!(pr_high.as_f32(), 1.0);
-        let pr_valid = PlayRate::new(0.5);
-        assert_eq!(pr_valid.as_f32(), 0.5);
-        assert_eq!(pr_valid.as_float(), 0.5);
-        assert_eq!(pr_valid.value(), 0.5);
-    }
-
-    #[test]
-    fn test_play_rate_as_pct() {
-        let pr = PlayRate::new(0.756);
-        assert_eq!(pr.as_pct(1), "75.6");
-        assert_eq!(pr.as_pct(2), "75.60");
-        let pr2 = PlayRate::new(0.1);
-        assert_eq!(pr2.as_pct(0), "10");
-        let pr3 = PlayRate::new(0.999);
-        assert_eq!(pr3.as_pct(2), "99.90");
-    }
-
-    #[test]
-    fn test_play_rate_compare() {
-        let pr1 = PlayRate::new(0.5);
-        let pr2 = PlayRate::new(0.75);
-        let pr3 = PlayRate::new(0.5);
-        assert_eq!(pr1.compare(&pr2), Ordering::Less);
-        assert_eq!(pr2.compare(&pr1), Ordering::Greater);
-        assert_eq!(pr1.compare(&pr3), Ordering::Equal);
+    /// Converts the UciMove back to its UCI string representation.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{UciMove, ChessSquare, ChessFile, ChessRank, ChessPieceType};
+    /// let uci_move = UciMove::new(
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Two),
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Four),
+    ///     None,
+    /// );
+    /// assert_eq!(uci_move.to_uci(), "e2e4");
+    /// let uci_with_promo = UciMove::new(
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Seven),
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Eight),
+    ///     Some(ChessPieceType::Queen),
+    /// );
+    /// assert_eq!(uci_with_promo.to_uci(), "e7e8q");
+    /// ```
+    pub fn to_uci(&self) -> String {
+        let mut uci_str = format!("{}{}", self.from.to_coords(), self.to.to_coords());
+        if let Some(promo) = self.promotion {
+            uci_str.push(promo.to_char().to_ascii_lowercase());
+        }
+        uci_str
     }
 }
 </file>
 
-<file path="src/domain/popularity_row.rs">
-#[derive(Clone, Debug)]
-pub struct PopularityRow {
-    pub uci: String,
-    pub play_rate: f32,
-    pub games: u32,
+<file path="src/infra/cache/kv_cache.rs">
+use async_trait::async_trait;
+use std::{hash::Hash, sync::Arc};
+
+/// Minimal cache trait to decouple from moka.
+#[async_trait]
+pub trait KvCache<K, V>: Send + Sync
+where
+    K: Eq + Hash + Send + Sync + 'static,
+    V: Send + Sync + 'static,
+{
+    async fn get(&self, k: &K) -> Option<Arc<V>>;
+    async fn put(&self, k: K, v: Arc<V>);
 }
 </file>
 
-<file path="src/pgn/pgn_writer.rs">
+<file path="src/infra/http/mod.rs">
+use reqwest::Client;
+
+pub fn build_http(timeout_ms: u64) -> Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(timeout_ms))
+        .build()
+        .expect("reqwest client")
+}
+</file>
+
+<file path="src/pgn/json_writer.rs">
+//! JSON writer for chess repertoire
+//! Serializes the repertoire tree to JSON format.
+
 use crate::{domain::RepertoireNode, pgn::RepertoireWriter};
+use anyhow::Result;
+use serde::Serialize;
 
-/// Minimal PGN writer that walks the node arena from the root.
-/// For brevity, this example assumes node 0 is root and siblings are variations.
+#[derive(Serialize)]
+struct JsonNode {
+    id: u64,
+    parent: Option<u64>,
+    children: Vec<u64>,
+    // Add other fields as needed
+}
+
+/// JSON writer that serializes the repertoire tree to JSON format.
 #[derive(Default)]
-pub struct PgnWriter;
+pub struct JsonWriter;
 
-impl RepertoireWriter for PgnWriter {
-    fn write(&self, _root: &RepertoireNode) -> anyhow::Result<String> {
-        // TODO: traverse stored arena (you may want to give writer a ref to arena)
-        // Emit tag pairs, SetUp/FEN when not initial, then SAN tokens + variations.
-        Ok(String::from("[Event \"Repertoire\"]\n\n1. e4 e5 *\n"))
+impl RepertoireWriter for JsonWriter {
+    fn write(&self, root: &RepertoireNode) -> Result<String> {
+        let json_root = JsonNode {
+            id: root.id,
+            parent: root.parent,
+            children: root.children.iter().map(|c| c.id).collect(),
+            // Add other fields as needed
+        };
+        serde_json::to_string(&json_root).map_err(Into::into)
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_pgn_writer() {
-        let writer = PgnWriter::default();
-        let result = writer.write(&RepertoireNode::default());
-        assert!(result.is_ok());
-    }
-}
-</file>
-
-<file path="src/pgn/repertoire_writer.rs">
-use crate::domain::RepertoireNode;
-
-/// Writer interface for alternate outputs later (JSON, DB, etc.)
-pub trait RepertoireWriter {
-    fn write(&self, root: &RepertoireNode) -> anyhow::Result<String>;
 }
 </file>
 
@@ -480,6 +433,16 @@ impl UciStr {
     pub fn into_inner(self) -> String {
         self.0
     }
+}
+</file>
+
+<file path="src/policy/decision.rs">
+/// Which role to use at a node.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Decision {
+    Quality,
+    Popularity,
+    Hybrid,
 }
 </file>
 
@@ -558,10 +521,10 @@ async fn lichess_eval_api_call(
 
 /// Encode fen for URL query param, special-case "startpos" for the starting position.
 fn fen_query_param(fen: &FenKey) -> String {
-    if fen.fen == "startpos" {
+    if fen.fen_string == "startpos" {
         "?fen=startpos".to_string()
     } else {
-        format!("?fen={}", urlencoding::encode(&fen.fen))
+        format!("?fen={}", urlencoding::encode(&fen.fen_string))
     }
 }
 
@@ -585,8 +548,8 @@ mod tests {
     async fn test_build_lichess_eval_url() {
         let base_url = "https://lichess.org/api/cloud-eval";
         let fen = FenKey {
-            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
-            stm: crate::domain::PieceColor::White,
+            fen_string: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
+            side_to_move: crate::domain::PieceColor::White,
         };
         let multipv = 3;
         let url = build_lichess_eval_url(base_url, &fen, multipv);
@@ -596,13 +559,13 @@ mod tests {
     #[tokio::test]
     async fn test_fen_query_param() {
         let fen1 = FenKey {
-            fen: "startpos".to_string(),
-            stm: crate::domain::PieceColor::White,
+            fen_string: "startpos".to_string(),
+            side_to_move: crate::domain::PieceColor::White,
         };
         assert_eq!(fen_query_param(&fen1), "?fen=startpos");
         let fen2 = FenKey {
-            fen: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
-            stm: crate::domain::PieceColor::White,
+            fen_string: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
+            side_to_move: crate::domain::PieceColor::White,
         };
         assert_eq!(
             fen_query_param(&fen2),
@@ -649,66 +612,2605 @@ pub trait MoveQuality: Send + Sync {
 }
 </file>
 
-<file path="src/domain/candidate_move.rs">
-use super::fen_key::FenKey;
-use super::signals::Signals;
+<file path="src/provider/popularity_caps.rs">
+pub struct PopularityCaps {
+    pub supports_filters: bool,
+}
+</file>
 
-#[derive(Clone, Debug)]
-pub struct CandidateMove {
-    pub uci: String,
-    pub next_fen: FenKey,
-    pub signals: Signals,
+<file path="src/search/arena/mod.rs">
+pub mod mem_arena;
+pub mod node_arena_store;
+
+pub use mem_arena::MemArena;
+pub use node_arena_store::NodeArenaStore;
+</file>
+
+<file path="src/search/arena/node_arena_store.rs">
+use crate::domain::RepertoireNode;
+
+#[async_trait::async_trait]
+pub trait NodeArenaStore: Send + Sync {
+    async fn len(&self) -> usize;
+    async fn get(&self, id: u64) -> Option<RepertoireNode>;
+    async fn push(&self, node: RepertoireNode) -> u64; // returns id
+    async fn push_child(&self, parent: u64, child_id: u64);
+}
+</file>
+
+<file path="src/lib.rs">
+pub mod config;
+pub mod domain;
+pub mod policy;
+pub mod search;
+pub mod provider;
+pub mod infra;
+pub mod pgn;
+pub mod cli;
+
+pub use cli::Cli;
+</file>
+
+<file path="src/config/app_config.rs">
+use std::fs;
+
+use serde::Deserialize;
+
+use crate::config::{
+    CacheConfig, HttpConfig, PolicyConfig, PopularityConfig, QualityConfig, RateConfig,
+    SearchConfig,
+};
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct AppConfig {
+    pub search: SearchConfig,
+    pub policy: PolicyConfig,
+    pub quality: QualityConfig,
+    pub popularity: PopularityConfig,
+    pub http: HttpConfig,
+    pub cache: CacheConfig,
+    pub rate: RateConfig,
+}
+
+impl AppConfig {
+    /// Load config from a TOML file.
+    pub fn load(path: &str) -> anyhow::Result<Self> {
+        let s = fs::read_to_string(path)?;
+        Ok(toml::from_str(&s)?)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::PlayRate;
+    use crate::domain::Centipawns;
 
     use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn sample_toml() -> String {
+        let default_config = "src/config/default_config.toml".to_string();
+        fs::read_to_string(default_config).expect("Failed to read default config")
+    }
 
     #[test]
-    fn test_candidate_move_creation() {
-        let move_ = CandidateMove {
-            uci: "e2e4".to_string(),
-            next_fen: FenKey {
-                fen: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1".to_string(),
-                stm: crate::domain::PieceColor::Black,
-            },
-            signals: Signals {
-                eval_cp: Some(0.85),
-                depth: None,
-                play_rate: Some(PlayRate::new(0.75)),
-                games: None,
-            },
-        };
+    fn test_load_from_toml() {
+        let toml_str = sample_toml();
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_str).unwrap();
+        let path = file.path().to_str().unwrap();
+        let cfg = AppConfig::load(path).unwrap();
+        assert_eq!(cfg.search.concurrency, 16);
+        assert_eq!(cfg.policy.cp_window, Centipawns::from_int(50));
+        assert_eq!(cfg.quality.source, "cloud");
+        assert_eq!(cfg.popularity.source, "explorer");
+        assert_eq!(cfg.http.timeout_ms, 9000);
+        assert_eq!(cfg.cache.entries, 200000);
+        assert_eq!(cfg.rate.cloud_per_sec, 2);
+    }
 
-        assert_eq!(move_.uci, "e2e4");
-        assert_eq!(
-            move_.next_fen.fen,
-            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
-        );
-        assert_eq!(move_.next_fen.stm, crate::domain::PieceColor::Black);
-        assert_eq!(move_.signals.play_rate, Some(PlayRate::new(0.75)));
-        assert_eq!(move_.signals.eval_cp, Some(0.85));
+    #[test]
+    fn test_debug_clone_deserialize() {
+        let toml_str = sample_toml();
+        let cfg: AppConfig = toml::from_str(&toml_str).unwrap();
+        let cfg2 = cfg.clone();
+        assert_eq!(cfg2.search.concurrency, cfg.search.concurrency);
+        let dbg = format!("{:?}", cfg2);
+        assert!(dbg.contains("AppConfig"));
     }
 }
 </file>
 
+<file path="src/config/default_config.toml">
+[search]
+concurrency          =16
+max_children_my_side =3
+max_children_opp_side=3
+max_total_nodes      =20000
+plies                =16
+rate                 =4
+
+[policy]
+cp_window    =50      # centipawns from best for engine candidates
+min_play_rate=0.07    # 7%+ frequency for opponent moves
+my_side      ="white" # overridden by CLI --side if provided
+
+[quality]
+base_url      ="https://lichess.org/api/cloud-eval"
+multi_pv      =4                                    # how many lines to request from engine
+source        ="cloud"                              # only "cloud" for now (local UCI later)
+
+[popularity]
+base_url  ="https://explorer.lichess.ovh/lichess"
+max_rating=2000
+min_rating=800
+since_year=2019
+source    ="explorer"
+speed     ="all"                                  # or "rapid", "classical", "all"
+variant   ="standard"
+
+[http]
+rate_per_sec_cloud   =2
+rate_per_sec_explorer=4
+retries              =3
+timeout_ms           =9000
+
+[cache]
+entries =200000
+ttl_secs=3600
+
+[rate]
+cloud_per_sec   =2
+explorer_per_sec=4
+</file>
+
+<file path="src/config/policy_config.rs">
+use super::toml_utils::{load_config_type_from_file, ConfigTypes};
+use crate::domain::{Centipawns, PlayRate};
+use anyhow::{anyhow, Result};
+use derive_builder::Builder;
+use serde::Deserialize;
+use shakmaty::Color;
+
+#[derive(Debug, Clone, Deserialize, Builder)]
+pub struct PolicyConfig {
+    /// Side to base the repertoire around. The "best" moves will be chosen for this side.
+    pub my_side: Option<String>,
+    pub cp_window: Centipawns,
+    pub min_play_rate: PlayRate,
+}
+
+impl PolicyConfig {
+    /// Load PolicyConfig from a TOML file.
+    /// # Arguments
+    /// * `filename` - Path to the TOML configuration file.
+    /// # Returns
+    /// * `Result<PolicyConfig>` - Loaded PolicyConfig or an error.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::PolicyConfig;
+    /// use repgrow::domain::{Centipawns, PlayRate};
+    ///
+    /// let cfg_path = "src/config/default_config.toml";
+    /// let cfg = PolicyConfig::load(cfg_path).unwrap();
+    /// assert_eq!(cfg.my_side, Some("white".to_string()));
+    /// assert_eq!(cfg.cp_window, Centipawns::from_int(50));
+    /// assert_eq!(cfg.min_play_rate, PlayRate::new(0.07));
+    /// ```
+    pub fn load(filename: &str) -> Result<Self> {
+        load_config_type_from_file(filename, "policy").and_then(|cfg| match cfg {
+            ConfigTypes::Policy(c) => Ok(c),
+            _ => Err(anyhow!("Expected PolicyConfig")),
+        })
+    }
+
+    /// Create a builder for PolicyConfig.
+    /// # Returns
+    /// * `PolicyConfigBuilder` - A builder for PolicyConfig.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::PolicyConfig;
+    /// use repgrow::domain::{Centipawns, PlayRate};
+    ///
+    /// let cfg = PolicyConfig::builder()
+    ///     .my_side(Some("black".to_string()))
+    ///     .cp_window(Centipawns::from_int(100))
+    ///     .min_play_rate(PlayRate::new(0.02))
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(cfg.my_side, Some("black".to_string()));
+    /// assert_eq!(cfg.cp_window, Centipawns::from_int(100));
+    /// assert_eq!(cfg.min_play_rate, PlayRate::new(0.02));
+    /// ```
+    pub fn builder() -> PolicyConfigBuilder {
+        PolicyConfigBuilder::default()
+    }
+
+    pub fn resolve_side_override(&self, cli_side: &str) -> Result<Color> {
+        let s = if !cli_side.is_empty() {
+            Some(cli_side.to_string())
+        } else {
+            self.my_side.clone()
+        };
+        match s.as_deref() {
+            Some("white") => Ok(Color::White),
+            Some("black") => Ok(Color::Black),
+            _ => anyhow::bail!("side must be white|black"),
+        }
+    }
+}
+
+impl Default for PolicyConfig {
+    /// Load the default PolicyConfig from the default configuration file.
+    /// # Returns
+    /// * `PolicyConfig` - The default PolicyConfig.
+    /// # Panics
+    /// Panics if the default configuration file cannot be loaded.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::PolicyConfig;
+    /// use repgrow::domain::{Centipawns, PlayRate};
+    ///
+    /// let cfg = PolicyConfig::default();
+    /// assert_eq!(cfg.my_side, Some("white".to_string()));
+    /// assert_eq!(cfg.cp_window, Centipawns::from_int(50));
+    /// assert_eq!(cfg.min_play_rate, PlayRate::new(0.07));
+    /// ```
+    fn default() -> Self {
+        let default_toml_file = "src/config/default_config.toml";
+        PolicyConfig::load(default_toml_file).expect("Failed to load default PolicyConfig")
+    }
+}
+</file>
+
+<file path="src/config/popularity_config.rs">
+use derive_builder::Builder;
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize, Builder)]
+pub struct PopularityConfig {
+    #[builder(default = "\"explorer\".to_string()")]
+    pub source: String, // "explorer" for now
+    #[builder(default = "\"https://explorer.lichess.ovh\".to_string()")]
+    pub base_url: String,
+    #[builder(default = "\"all\".to_string()")]
+    pub speed: String,
+    #[builder(default = "800")]
+    pub min_rating: u32,
+    #[builder(default = "2000")]
+    pub max_rating: u32,
+    #[builder(default = "2019")]
+    pub since_year: u32,
+}
+
+impl PopularityConfig {
+    /// Load PopularityConfig from a TOML file.
+    /// # Arguments
+    /// * `filename` - Path to the TOML configuration file.
+    /// # Returns
+    /// * `Result<PopularityConfig>` - Loaded PopularityConfig or an error.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::PopularityConfig;
+    /// let cfg_path = "src/config/default_config.toml";
+    /// let cfg = PopularityConfig::load(cfg_path).unwrap();
+    /// assert_eq!(cfg.source, "explorer".to_string());
+    /// assert_eq!(cfg.base_url, "https://explorer.lichess.ovh/lichess".to_string());
+    /// assert_eq!(cfg.speed, "all".to_string());
+    /// assert_eq!(cfg.min_rating, 800);
+    /// assert_eq!(cfg.max_rating, 2000);
+    /// assert_eq!(cfg.since_year, 2019);
+    /// ```
+    pub fn load(filename: &str) -> anyhow::Result<Self> {
+        crate::config::toml_utils::load_config_type_from_file(filename, "popularity").and_then(
+            |cfg| match cfg {
+                crate::config::toml_utils::ConfigTypes::Popularity(c) => Ok(c),
+                _ => Err(anyhow::anyhow!("Expected PopularityConfig")),
+            },
+        )
+    }
+
+    /// Create a builder for PopularityConfig.
+    /// # Returns
+    /// * `PopularityConfigBuilder` - A builder for PopularityConfig.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::PopularityConfig;
+    ///
+    /// let built_cfg = PopularityConfig::builder()
+    ///     .source("explorer".to_string())
+    ///     .base_url("https://explorer.lichess.ovh".to_string())
+    ///     .speed("blitz".to_string())
+    ///     .min_rating(1000)
+    ///     .max_rating(2200)
+    ///     .since_year(2020)
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(built_cfg.source, "explorer".to_string());
+    /// assert_eq!(built_cfg.base_url, "https://explorer.lichess.ovh".to_string());
+    /// assert_eq!(built_cfg.speed, "blitz".to_string());
+    /// assert_eq!(built_cfg.min_rating, 1000);
+    /// assert_eq!(built_cfg.max_rating, 2200);
+    /// assert_eq!(built_cfg.since_year, 2020);
+    /// ```
+    pub fn builder() -> PopularityConfigBuilder {
+        PopularityConfigBuilder::default()
+    }
+}
+
+impl Default for PopularityConfig {
+    /// Load the default PopularityConfig from the default configuration file.
+    /// # Returns
+    /// * `PopularityConfig` - The default PopularityConfig.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::PopularityConfig;
+    ///
+    /// let cfg = PopularityConfig::default();
+    /// assert_eq!(cfg.source, "explorer".to_string());
+    /// assert_eq!(cfg.base_url, "https://explorer.lichess.ovh/lichess".to_string());
+    /// assert_eq!(cfg.speed, "all".to_string());
+    /// assert_eq!(cfg.min_rating, 800);
+    /// assert_eq!(cfg.max_rating, 2000);
+    /// assert_eq!(cfg.since_year, 2019);
+    /// ```
+    fn default() -> Self {
+        let filename = "src/config/default_config.toml";
+        Self::load(filename).expect("Failed to load default config")
+    }
+}
+</file>
+
+<file path="src/config/toml_utils.rs">
+use crate::config::{
+    AppConfig, CacheConfig, HttpConfig, PolicyConfig, PopularityConfig, QualityConfig, RateConfig,
+    SearchConfig,
+};
+use anyhow::Result;
+use toml;
+
+pub enum ConfigTypes {
+    Cache(CacheConfig),
+    Http(HttpConfig),
+    Policy(PolicyConfig),
+    Popularity(PopularityConfig),
+    Quality(QualityConfig),
+    Rate(RateConfig),
+    Search(SearchConfig),
+}
+
+impl ConfigTypes {
+    /// Get the string representation of the config type.
+    /// # Returns
+    /// * `&'static str` - The string representation of the config type.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::toml_utils::{ConfigTypes, load_config_type_from_file};
+    /// let cfg_path = "src/config/default_config.toml";
+    /// let http_cfg = load_config_type_from_file(cfg_path, "http").unwrap();
+    /// assert_eq!(http_cfg.as_str(), "http");
+    ///
+    /// let cache_cfg = load_config_type_from_file(cfg_path, "cache").unwrap();
+    /// assert_eq!(cache_cfg.as_str(), "cache");
+    ///
+    /// let policy_cfg = load_config_type_from_file(cfg_path, "policy").unwrap();
+    /// assert_eq!(policy_cfg.as_str(), "policy");
+    ///
+    /// let popularity_cfg = load_config_type_from_file(cfg_path, "popularity").unwrap();
+    /// assert_eq!(popularity_cfg.as_str(), "popularity");
+    ///
+    /// let quality_cfg = load_config_type_from_file(cfg_path, "quality").unwrap();
+    /// assert_eq!(quality_cfg.as_str(), "quality");
+    ///
+    /// let rate_cfg = load_config_type_from_file(cfg_path, "rate").unwrap();
+    /// assert_eq!(rate_cfg.as_str(), "rate");
+    ///
+    /// let search_cfg = load_config_type_from_file(cfg_path, "search").unwrap();
+    /// assert_eq!(search_cfg.as_str(), "search");
+    /// ```
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ConfigTypes::Cache(_) => "cache",
+            ConfigTypes::Http(_) => "http",
+            ConfigTypes::Policy(_) => "policy",
+            ConfigTypes::Popularity(_) => "popularity",
+            ConfigTypes::Quality(_) => "quality",
+            ConfigTypes::Rate(_) => "rate",
+            ConfigTypes::Search(_) => "search",
+        }
+    }
+}
+
+/// Load the entire TOML configuration from a file and into an AppConfig struct.
+/// # Arguments
+/// * `path` - Path to the TOML configuration file.
+/// # Returns
+/// * `Result<AppConfig>` - Loaded AppConfig or an error.
+/// # Examples
+/// ```
+/// use repgrow::config::toml_utils::load_toml_from_file;
+/// let cfg_path = "src/config/default_config.toml";
+/// let cfg = load_toml_from_file(cfg_path).unwrap();
+/// assert_eq!(cfg.http.timeout_ms, 9000);
+/// assert_eq!(cfg.http.retries, 3);
+/// assert_eq!(cfg.http.rate_per_sec_cloud, 2);
+/// ```
+pub fn load_toml_from_file(path: &str) -> Result<AppConfig> {
+    let file_contents = std::fs::read_to_string(path)?;
+    Ok(toml::from_str(&file_contents)?)
+}
+
+/// Load the default AppConfig from the default configuration file.
+/// # Returns
+/// * `Result<AppConfig>` - The default AppConfig or an error.
+/// # Examples
+/// ```
+/// use repgrow::config::toml_utils::load_default_config;
+/// let cfg = load_default_config().unwrap();
+/// assert_eq!(cfg.http.timeout_ms, 9000);
+/// assert_eq!(cfg.http.retries, 3);
+/// assert_eq!(cfg.http.rate_per_sec_cloud, 2);
+/// ```
+pub fn load_default_config() -> Result<AppConfig> {
+    let default_toml_file = "src/config/default_config.toml";
+    load_toml_from_file(default_toml_file)
+}
+
+/// Load a specific configuration type from a TOML file.
+/// # Arguments
+/// * `path` - Path to the TOML configuration file.
+/// * `config_type` - The type of configuration to load (e.g., "cache", "http", "policy", etc.).
+/// # Returns
+/// * `Result<ConfigTypes>` - Loaded configuration of the specified type or an error.
+/// # Examples
+/// ```
+/// use repgrow::config::toml_utils::{ConfigTypes, load_config_type_from_file};
+/// let cfg_path = "src/config/default_config.toml";
+/// let http_cfg = load_config_type_from_file(cfg_path, "http").unwrap();
+/// assert_eq!(http_cfg.as_str(), "http");
+///
+/// let cache_cfg = load_config_type_from_file(cfg_path, "cache").unwrap();
+/// let policy_cfg = load_config_type_from_file(cfg_path, "policy").unwrap();
+/// let popularity_cfg = load_config_type_from_file(cfg_path, "popularity").unwrap();
+/// let quality_cfg = load_config_type_from_file(cfg_path, "quality").unwrap();
+/// let rate_cfg = load_config_type_from_file(cfg_path, "rate").unwrap();
+/// let search_cfg = load_config_type_from_file(cfg_path, "search").unwrap();
+/// let http_cfg = load_config_type_from_file(cfg_path, "http").unwrap();
+///
+/// assert_eq!(http_cfg.as_str(), "http");
+/// assert_eq!(cache_cfg.as_str(), "cache");
+/// assert_eq!(policy_cfg.as_str(), "policy");
+/// assert_eq!(popularity_cfg.as_str(), "popularity");
+/// assert_eq!(quality_cfg.as_str(), "quality");
+/// assert_eq!(rate_cfg.as_str(), "rate");
+/// assert_eq!(search_cfg.as_str(), "search");
+pub fn load_config_type_from_file(path: &str, config_type: &str) -> Result<ConfigTypes> {
+    let file_contents = load_toml_from_file(path)?;
+
+    match config_type {
+        "cache" => Ok(ConfigTypes::Cache(file_contents.cache)),
+        "http" => Ok(ConfigTypes::Http(file_contents.http)),
+        "policy" => Ok(ConfigTypes::Policy(file_contents.policy)),
+        "popularity" => Ok(ConfigTypes::Popularity(file_contents.popularity)),
+        "quality" => Ok(ConfigTypes::Quality(file_contents.quality)),
+        "rate" => Ok(ConfigTypes::Rate(file_contents.rate)),
+        "search" => Ok(ConfigTypes::Search(file_contents.search)),
+        _ => Err(anyhow::anyhow!("Unsupported config type")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_default_config_for_search() {
+        let config = load_default_config().expect("Failed to load default config");
+        assert_eq!(config.search.concurrency, 16);
+    }
+
+    #[test]
+    fn test_load_default_config_for_policy() {
+        let config = load_default_config().expect("Failed to load default config");
+        assert_eq!(config.policy.my_side, Some("white".into()));
+    }
+
+    #[test]
+    fn test_load_default_config_for_quality() {
+        let config = load_default_config().expect("Failed to load default config");
+        assert_eq!(config.quality.multi_pv, 4);
+        assert_eq!(config.quality.source, "cloud");
+    }
+
+    #[test]
+    fn test_load_default_config_for_popularity() {
+        let config = load_default_config().expect("Failed to load default config");
+        assert_eq!(config.popularity.speed, "all");
+    }
+
+    #[test]
+    fn test_load_default_config_for_cache() {
+        let config = load_default_config().expect("Failed to load default config");
+        assert_eq!(config.cache.entries, 200000);
+        assert_eq!(config.cache.ttl_secs, 3600);
+    }
+
+    #[test]
+    fn test_load_default_config_for_http() {
+        let config = load_default_config().expect("Failed to load default config");
+        assert_eq!(config.http.rate_per_sec_cloud, 2);
+        assert_eq!(config.http.rate_per_sec_explorer, 4);
+        assert_eq!(config.http.retries, 3);
+        assert_eq!(config.http.timeout_ms, 9000);
+    }
+}
+</file>
+
+<file path="src/domain/chess/chess_file.rs">
+use serde::{Deserialize, Serialize};
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChessFileParseError;
+
+impl std::fmt::Display for ChessFileParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid chess file")
+    }
+}
+
+impl std::error::Error for ChessFileParseError {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChessFile {
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+}
+
+impl ChessFile {
+    /// Converts the ChessFile to its corresponding u8 value (1-8).
+    /// A -> 1, B -> 2, ..., H -> 8
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessFile;
+    /// assert_eq!(ChessFile::A.to_u8(), 1);
+    /// assert_eq!(ChessFile::H.to_u8(), 8);
+    /// ```
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            ChessFile::A => 1,
+            ChessFile::B => 2,
+            ChessFile::C => 3,
+            ChessFile::D => 4,
+            ChessFile::E => 5,
+            ChessFile::F => 6,
+            ChessFile::G => 7,
+            ChessFile::H => 8,
+        }
+    }
+
+    /// Alias for to_u8
+    pub fn to_int(&self) -> u8 {
+        self.to_u8()
+    }
+
+    /// Converts the ChessFile to its corresponding character ('a'-'h').
+    /// A -> 'a', B -> 'b', ..., H -> 'h'
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessFile;
+    /// assert_eq!(ChessFile::A.to_char(), 'a');
+    /// assert_eq!(ChessFile::H.to_char(), 'h');
+    /// ```
+    pub fn to_char(&self) -> char {
+        match self {
+            ChessFile::A => 'a',
+            ChessFile::B => 'b',
+            ChessFile::C => 'c',
+            ChessFile::D => 'd',
+            ChessFile::E => 'e',
+            ChessFile::F => 'f',
+            ChessFile::G => 'g',
+            ChessFile::H => 'h',
+        }
+    }
+
+    /// Creates a ChessFile from a u8 value (1-8).
+    /// Returns an error for values outside this range.
+    pub fn from_u8(value: u8) -> std::result::Result<Self, ChessFileParseError> {
+        match value {
+            1 => Ok(ChessFile::A),
+            2 => Ok(ChessFile::B),
+            3 => Ok(ChessFile::C),
+            4 => Ok(ChessFile::D),
+            5 => Ok(ChessFile::E),
+            6 => Ok(ChessFile::F),
+            7 => Ok(ChessFile::G),
+            8 => Ok(ChessFile::H),
+            _ => Err(ChessFileParseError),
+        }
+    }
+
+    /// Creates a ChessFile from a character ('a'-'h' or 'A'-'H').
+    /// Returns an error for characters outside this range.
+    pub fn from_char(c: char) -> std::result::Result<Self, ChessFileParseError> {
+        match c {
+            'a' | 'A' => Ok(ChessFile::A),
+            'b' | 'B' => Ok(ChessFile::B),
+            'c' | 'C' => Ok(ChessFile::C),
+            'd' | 'D' => Ok(ChessFile::D),
+            'e' | 'E' => Ok(ChessFile::E),
+            'f' | 'F' => Ok(ChessFile::F),
+            'g' | 'G' => Ok(ChessFile::G),
+            'h' | 'H' => Ok(ChessFile::H),
+            _ => Err(ChessFileParseError),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_int() {
+        assert_eq!(ChessFile::A.to_int(), 1);
+        assert_eq!(ChessFile::B.to_int(), 2);
+        assert_eq!(ChessFile::C.to_int(), 3);
+        assert_eq!(ChessFile::D.to_int(), 4);
+        assert_eq!(ChessFile::E.to_int(), 5);
+        assert_eq!(ChessFile::F.to_int(), 6);
+        assert_eq!(ChessFile::G.to_int(), 7);
+        assert_eq!(ChessFile::H.to_int(), 8);
+    }
+
+    #[test]
+    fn test_to_u8() {
+        assert_eq!(ChessFile::A.to_u8(), 1);
+        assert_eq!(ChessFile::B.to_u8(), 2);
+        assert_eq!(ChessFile::C.to_u8(), 3);
+        assert_eq!(ChessFile::D.to_u8(), 4);
+        assert_eq!(ChessFile::E.to_u8(), 5);
+        assert_eq!(ChessFile::F.to_u8(), 6);
+        assert_eq!(ChessFile::G.to_u8(), 7);
+        assert_eq!(ChessFile::H.to_u8(), 8);
+    }
+
+    #[test]
+    fn test_to_char() {
+        assert_eq!(ChessFile::A.to_char(), 'a');
+        assert_eq!(ChessFile::B.to_char(), 'b');
+        assert_eq!(ChessFile::C.to_char(), 'c');
+        assert_eq!(ChessFile::D.to_char(), 'd');
+        assert_eq!(ChessFile::E.to_char(), 'e');
+        assert_eq!(ChessFile::F.to_char(), 'f');
+        assert_eq!(ChessFile::G.to_char(), 'g');
+        assert_eq!(ChessFile::H.to_char(), 'h');
+    }
+
+    #[test]
+    fn test_from_u8() {
+        assert_eq!(ChessFile::from_u8(1), Ok(ChessFile::A));
+        assert_eq!(ChessFile::from_u8(2), Ok(ChessFile::B));
+        assert_eq!(ChessFile::from_u8(3), Ok(ChessFile::C));
+        assert_eq!(ChessFile::from_u8(4), Ok(ChessFile::D));
+        assert_eq!(ChessFile::from_u8(5), Ok(ChessFile::E));
+        assert_eq!(ChessFile::from_u8(6), Ok(ChessFile::F));
+        assert_eq!(ChessFile::from_u8(7), Ok(ChessFile::G));
+        assert_eq!(ChessFile::from_u8(8), Ok(ChessFile::H));
+        assert_eq!(ChessFile::from_u8(9), Err(ChessFileParseError));
+    }
+
+    #[test]
+    fn test_from_char() {
+        assert_eq!(ChessFile::from_char('a'), Ok(ChessFile::A));
+        assert_eq!(ChessFile::from_char('b'), Ok(ChessFile::B));
+        assert_eq!(ChessFile::from_char('c'), Ok(ChessFile::C));
+        assert_eq!(ChessFile::from_char('d'), Ok(ChessFile::D));
+        assert_eq!(ChessFile::from_char('e'), Ok(ChessFile::E));
+        assert_eq!(ChessFile::from_char('f'), Ok(ChessFile::F));
+        assert_eq!(ChessFile::from_char('g'), Ok(ChessFile::G));
+        assert_eq!(ChessFile::from_char('h'), Ok(ChessFile::H));
+        assert_eq!(ChessFile::from_char('i'), Err(ChessFileParseError));
+    }
+}
+</file>
+
+<file path="src/domain/chess/chess_piece_type.rs">
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ChessPieceType {
+    Pawn,
+    Knight,
+    Bishop,
+    Rook,
+    Queen,
+    King,
+}
+
+impl ChessPieceType {
+    /// Creates a ChessPieceType from a character ('p','n','b','r','q','k' or uppercase).
+    /// Returns None for characters outside this range.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessPieceType;
+    /// assert_eq!(ChessPieceType::from_char('p'), Some(ChessPieceType::Pawn));
+    /// assert_eq!(ChessPieceType::from_char('K'), Some(ChessPieceType::King));
+    /// assert_eq!(ChessPieceType::from_char('x'), None);
+    /// ```
+    pub fn from_char(c: char) -> Option<Self> {
+        match c.to_ascii_lowercase() {
+            'p' => Some(ChessPieceType::Pawn),
+            'n' => Some(ChessPieceType::Knight),
+            'b' => Some(ChessPieceType::Bishop),
+            'r' => Some(ChessPieceType::Rook),
+            'q' => Some(ChessPieceType::Queen),
+            'k' => Some(ChessPieceType::King),
+            _ => None,
+        }
+    }
+
+    /// Converts the ChessPieceType to its corresponding character used in SAN ('p','N','B','R','Q','K').
+    ///
+    /// # Notes
+    /// This function is used to convert the internal representation of a chess piece type
+    /// to the character representation used in Standard Algebraic Notation (SAN). In SAN,
+    /// pawns are represented by the absence of a letter, but for the purpose of this
+    /// function, we use 'p' to represent pawns for consistency.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessPieceType;
+    /// assert_eq!(ChessPieceType::Pawn.to_char(), 'p');
+    /// assert_eq!(ChessPieceType::King.to_char(), 'K');
+    /// ```
+    pub fn to_char(self) -> char {
+        match self {
+            ChessPieceType::Pawn => 'p',
+            ChessPieceType::Knight => 'N',
+            ChessPieceType::Bishop => 'B',
+            ChessPieceType::Rook => 'R',
+            ChessPieceType::Queen => 'Q',
+            ChessPieceType::King => 'K',
+        }
+    }
+
+    /// Extracts the promotion piece type from a UCI promotion string.
+    /// Returns None if the character does not correspond to a valid promotion piece type, or if it is not included.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessPieceType;
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8q"), Some(ChessPieceType::Queen));
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8n"), Some(ChessPieceType::Knight));
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8"), None);
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8x"), None);
+    /// ```
+    pub fn from_uci_string(uci: &str) -> Option<Self> {
+        if uci.len() == 5 {
+            let promo_char = uci.chars().nth(4).unwrap();
+            Self::from_char(promo_char)
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_char_works_for_lowercase_chars() {
+        assert_eq!(ChessPieceType::from_char('p'), Some(ChessPieceType::Pawn));
+        assert_eq!(ChessPieceType::from_char('n'), Some(ChessPieceType::Knight));
+        assert_eq!(ChessPieceType::from_char('b'), Some(ChessPieceType::Bishop));
+        assert_eq!(ChessPieceType::from_char('r'), Some(ChessPieceType::Rook));
+        assert_eq!(ChessPieceType::from_char('q'), Some(ChessPieceType::Queen));
+        assert_eq!(ChessPieceType::from_char('k'), Some(ChessPieceType::King));
+    }
+
+    #[test]
+    fn test_from_char_works_for_uppercase_chars() {
+        assert_eq!(ChessPieceType::from_char('P'), Some(ChessPieceType::Pawn));
+        assert_eq!(ChessPieceType::from_char('N'), Some(ChessPieceType::Knight));
+        assert_eq!(ChessPieceType::from_char('B'), Some(ChessPieceType::Bishop));
+        assert_eq!(ChessPieceType::from_char('R'), Some(ChessPieceType::Rook));
+        assert_eq!(ChessPieceType::from_char('Q'), Some(ChessPieceType::Queen));
+        assert_eq!(ChessPieceType::from_char('K'), Some(ChessPieceType::King));
+    }
+
+    #[test]
+    fn test_from_char_returns_none_for_invalid_chars() {
+        assert_eq!(ChessPieceType::from_char('1'), None);
+        assert_eq!(ChessPieceType::from_char('x'), None);
+    }
+
+    #[test]
+    fn test_to_char_returns_correct_char() {
+        assert_eq!(ChessPieceType::Pawn.to_char(), 'p');
+        assert_eq!(ChessPieceType::Knight.to_char(), 'N');
+        assert_eq!(ChessPieceType::Bishop.to_char(), 'B');
+        assert_eq!(ChessPieceType::Rook.to_char(), 'R');
+        assert_eq!(ChessPieceType::Queen.to_char(), 'Q');
+        assert_eq!(ChessPieceType::King.to_char(), 'K');
+    }
+}
+</file>
+
+<file path="src/domain/chess/chess_rank.rs">
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChessRankParseError;
+
+impl std::fmt::Display for ChessRankParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid chess rank")
+    }
+}
+
+impl std::error::Error for ChessRankParseError {}
+use std::fmt::{Display, Formatter};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ChessRank {
+    One = 1,
+    Two,
+    Three,
+    Four,
+    Five,
+    Six,
+    Seven,
+    Eight,
+}
+
+impl ChessRank {
+    /// Converts a character to a `ChessRank`.
+    ///
+    /// Accepts characters '1' through '8' and returns the corresponding `ChessRank`.
+    /// Returns an error for invalid characters.
+    pub fn from_char(c: char) -> Result<ChessRank, ChessRankParseError> {
+        match c {
+            '1' => Ok(ChessRank::One),
+            '2' => Ok(ChessRank::Two),
+            '3' => Ok(ChessRank::Three),
+            '4' => Ok(ChessRank::Four),
+            '5' => Ok(ChessRank::Five),
+            '6' => Ok(ChessRank::Six),
+            '7' => Ok(ChessRank::Seven),
+            '8' => Ok(ChessRank::Eight),
+            _ => Err(ChessRankParseError),
+        }
+    }
+
+    /// Converts an integer (1-8) to a `ChessRank`. Returns an error for invalid integers.
+    pub fn from_int(n: u8) -> Result<ChessRank, ChessRankParseError> {
+        match n {
+            1 => Ok(ChessRank::One),
+            2 => Ok(ChessRank::Two),
+            3 => Ok(ChessRank::Three),
+            4 => Ok(ChessRank::Four),
+            5 => Ok(ChessRank::Five),
+            6 => Ok(ChessRank::Six),
+            7 => Ok(ChessRank::Seven),
+            8 => Ok(ChessRank::Eight),
+            _ => Err(ChessRankParseError),
+        }
+    }
+
+    /// Converts the `ChessRank` to its corresponding character ('1'-'8').
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessRank;
+    /// assert_eq!(ChessRank::One.to_char(), '1');
+    /// assert_eq!(ChessRank::Five.to_char(), '5');
+    /// ```
+    pub fn to_char(&self) -> char {
+        match self {
+            ChessRank::One => '1',
+            ChessRank::Two => '2',
+            ChessRank::Three => '3',
+            ChessRank::Four => '4',
+            ChessRank::Five => '5',
+            ChessRank::Six => '6',
+            ChessRank::Seven => '7',
+            ChessRank::Eight => '8',
+        }
+    }
+
+    /// Converts the `ChessRank` to its corresponding integer (1-8).
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessRank;
+    /// assert_eq!(ChessRank::One.to_int(), 1);
+    /// assert_eq!(ChessRank::Five.to_int(), 5);
+    /// ```
+    pub fn to_int(&self) -> u8 {
+        match self {
+            ChessRank::One => 1,
+            ChessRank::Two => 2,
+            ChessRank::Three => 3,
+            ChessRank::Four => 4,
+            ChessRank::Five => 5,
+            ChessRank::Six => 6,
+            ChessRank::Seven => 7,
+            ChessRank::Eight => 8,
+        }
+    }
+}
+
+impl Display for ChessRank {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_char())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_from_char_works_for_valid_chars() {
+        assert_eq!(ChessRank::from_char('1'), Ok(ChessRank::One));
+        assert_eq!(ChessRank::from_char('2'), Ok(ChessRank::Two));
+        assert_eq!(ChessRank::from_char('3'), Ok(ChessRank::Three));
+        assert_eq!(ChessRank::from_char('4'), Ok(ChessRank::Four));
+        assert_eq!(ChessRank::from_char('5'), Ok(ChessRank::Five));
+        assert_eq!(ChessRank::from_char('6'), Ok(ChessRank::Six));
+        assert_eq!(ChessRank::from_char('7'), Ok(ChessRank::Seven));
+        assert_eq!(ChessRank::from_char('8'), Ok(ChessRank::Eight));
+    }
+
+    #[test]
+    fn test_from_char_returns_err_for_invalid_chars() {
+        assert_eq!(ChessRank::from_char('0'), Err(ChessRankParseError));
+        assert_eq!(ChessRank::from_char('9'), Err(ChessRankParseError));
+        assert_eq!(ChessRank::from_char('a'), Err(ChessRankParseError));
+    }
+
+    #[test]
+    fn test_from_int_works_for_valid_ints() {
+        assert_eq!(ChessRank::from_int(1), Ok(ChessRank::One));
+        assert_eq!(ChessRank::from_int(2), Ok(ChessRank::Two));
+        assert_eq!(ChessRank::from_int(3), Ok(ChessRank::Three));
+        assert_eq!(ChessRank::from_int(4), Ok(ChessRank::Four));
+        assert_eq!(ChessRank::from_int(5), Ok(ChessRank::Five));
+        assert_eq!(ChessRank::from_int(6), Ok(ChessRank::Six));
+        assert_eq!(ChessRank::from_int(7), Ok(ChessRank::Seven));
+        assert_eq!(ChessRank::from_int(8), Ok(ChessRank::Eight));
+    }
+
+    #[test]
+    fn test_from_int_returns_err_for_invalid_ints() {
+        assert_eq!(ChessRank::from_int(0), Err(ChessRankParseError));
+        assert_eq!(ChessRank::from_int(9), Err(ChessRankParseError));
+        assert_eq!(ChessRank::from_int(10), Err(ChessRankParseError));
+    }
+
+    #[test]
+    fn test_to_char_returns_correct_char() {
+        assert_eq!(ChessRank::One.to_char(), '1');
+        assert_eq!(ChessRank::Two.to_char(), '2');
+        assert_eq!(ChessRank::Three.to_char(), '3');
+        assert_eq!(ChessRank::Four.to_char(), '4');
+        assert_eq!(ChessRank::Five.to_char(), '5');
+        assert_eq!(ChessRank::Six.to_char(), '6');
+        assert_eq!(ChessRank::Seven.to_char(), '7');
+        assert_eq!(ChessRank::Eight.to_char(), '8');
+    }
+
+    #[test]
+    fn test_to_int_returns_correct_int() {
+        assert_eq!(ChessRank::One.to_int(), 1);
+        assert_eq!(ChessRank::Two.to_int(), 2);
+        assert_eq!(ChessRank::Three.to_int(), 3);
+        assert_eq!(ChessRank::Four.to_int(), 4);
+        assert_eq!(ChessRank::Five.to_int(), 5);
+        assert_eq!(ChessRank::Six.to_int(), 6);
+        assert_eq!(ChessRank::Seven.to_int(), 7);
+        assert_eq!(ChessRank::Eight.to_int(), 8);
+    }
+
+    #[test]
+    fn test_display_works() {
+        assert_eq!(format!("{}", ChessRank::One), "1");
+        assert_eq!(format!("{}", ChessRank::Two), "2");
+        assert_eq!(format!("{}", ChessRank::Three), "3");
+        assert_eq!(format!("{}", ChessRank::Four), "4");
+        assert_eq!(format!("{}", ChessRank::Five), "5");
+        assert_eq!(format!("{}", ChessRank::Six), "6");
+        assert_eq!(format!("{}", ChessRank::Seven), "7");
+        assert_eq!(format!("{}", ChessRank::Eight), "8");
+    }
+}
+</file>
+
+<file path="src/domain/chess/chess_square.rs">
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChessSquareParseError;
+
+impl std::fmt::Display for ChessSquareParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid chess square")
+    }
+}
+
+impl std::error::Error for ChessSquareParseError {}
+use crate::domain::chess::{ChessFile, ChessRank};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChessSquare(pub ChessFile, pub ChessRank);
+
+impl ChessSquare {
+    /// Creates a new `ChessSquare` from the given `ChessFile` and `ChessRank`.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{ChessSquare, ChessFile, ChessRank};
+    /// let square = ChessSquare::new(ChessFile::E, ChessRank::Four);
+    /// assert_eq!(square.to_string(), "e4");
+    /// ```
+    pub fn new(file: ChessFile, rank: ChessRank) -> Self {
+        Self(file, rank)
+    }
+
+    /// Parses a chess square from a coordinate string like "e4".
+    ///
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{ChessSquare, ChessFile, ChessRank};
+    /// use repgrow::domain::chess::chess_square::ChessSquareParseError;
+    /// assert_eq!(ChessSquare::from_coords("e4"), Ok(ChessSquare::new(ChessFile::E, ChessRank::Four)));
+    /// assert_eq!(ChessSquare::from_coords("a1"), Ok(ChessSquare::new(ChessFile::A, ChessRank::One)));
+    /// assert_eq!(ChessSquare::from_coords("h8"), Ok(ChessSquare::new(ChessFile::H, ChessRank::Eight)));
+    /// assert_eq!(ChessSquare::from_coords("i9"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::from_coords("e9"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::from_coords("z4"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::from_coords("e"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::from_coords("4"), Err(ChessSquareParseError));
+    /// ```
+    pub fn from_coords(s: &str) -> Result<Self, ChessSquareParseError> {
+        if s.len() != 2 {
+            return Err(ChessSquareParseError);
+        }
+        let mut chars = s.chars();
+        let file_char = chars.next().unwrap();
+        let rank_char = chars.next().unwrap();
+        let file = ChessFile::from_char(file_char).map_err(|_| ChessSquareParseError)?;
+        let rank = ChessRank::from_char(rank_char).map_err(|_| ChessSquareParseError)?;
+        Ok(Self::new(file, rank))
+    }
+
+    /// Converts the `ChessSquare` to its string representation (e.g., "e4").
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{ChessSquare, ChessFile, ChessRank};
+    /// let square = ChessSquare::new(ChessFile::E, ChessRank::Four);
+    /// assert_eq!(square.to_coords(), "e4");
+    /// let square = ChessSquare::new(ChessFile::A, ChessRank::One);
+    /// assert_eq!(square.to_coords(), "a1");
+    /// let square = ChessSquare::new(ChessFile::H, ChessRank::Eight);
+    /// assert_eq!(square.to_coords(), "h8");
+    /// ```
+    pub fn to_coords(&self) -> String {
+        format!("{}{}", self.0.to_char(), self.1.to_char())
+    }
+
+    /// Extract the from square from a UCI move string.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{ChessSquare, ChessFile, ChessRank};
+    /// use repgrow::domain::chess::chess_square::ChessSquareParseError;
+    /// assert_eq!(ChessSquare::extract_uci_from_square("e2e4"), Ok(ChessSquare::from_coords("e2").unwrap()));
+    /// assert_eq!(ChessSquare::extract_uci_from_square("a7a8q"), Ok(ChessSquare::from_coords("a7").unwrap()));
+    /// assert_eq!(ChessSquare::extract_uci_from_square("h1h8"), Ok(ChessSquare::from_coords("h1").unwrap()));
+    /// assert_eq!(ChessSquare::extract_uci_from_square("e9e4"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::extract_uci_from_square("i2e4"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::extract_uci_from_square("e2e"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::extract_uci_from_square("e2e4xx"), Err(ChessSquareParseError));
+    /// ```
+    pub fn extract_uci_from_square(uci: &str) -> Result<ChessSquare, ChessSquareParseError> {
+        if uci.len() < 4 || uci.len() > 5 {
+            Err(Self::uci_len_format_error(uci))
+        } else {
+            let from_str = &uci[0..2];
+            ChessSquare::from_coords(from_str)
+        }
+    }
+
+    /// Extract the to square from a UCI move string.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{ChessSquare, ChessFile, ChessRank};
+    /// use repgrow::domain::chess::chess_square::ChessSquareParseError;
+    /// assert_eq!(ChessSquare::extract_uci_to_square("e2e4"), Ok(ChessSquare::from_coords("e4").unwrap()));
+    /// assert_eq!(ChessSquare::extract_uci_to_square("a7a8q"), Ok(ChessSquare::from_coords("a8").unwrap()));
+    /// assert_eq!(ChessSquare::extract_uci_to_square("h1h8"), Ok(ChessSquare::from_coords("h8").unwrap()));
+    /// assert_eq!(ChessSquare::extract_uci_to_square("e2e9"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::extract_uci_to_square("e2i4"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::extract_uci_to_square("e2e"), Err(ChessSquareParseError));
+    /// assert_eq!(ChessSquare::extract_uci_to_square("e2e4xx"), Err(ChessSquareParseError));
+    /// ```
+    pub fn extract_uci_to_square(uci: &str) -> Result<ChessSquare, ChessSquareParseError> {
+        if uci.len() < 4 || uci.len() > 5 {
+            Err(Self::uci_len_format_error(uci))
+        } else {
+            let to_str = &uci[2..4];
+            ChessSquare::from_coords(to_str)
+        }
+    }
+
+    fn uci_len_format_error(uci: &str) -> ChessSquareParseError {
+        dbg!(format!(
+            "Invalid UCI move length: len({})={}",
+            uci,
+            uci.len()
+        ));
+        ChessSquareParseError
+    }
+
+    /// Returns the file of the chess square.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{ChessSquare, ChessFile, ChessRank};
+    /// let square = ChessSquare::new(ChessFile::E, ChessRank::Four);
+    /// assert_eq!(square.file().to_char(), 'e');
+    /// assert_eq!(square.file().to_int(), 5);
+    /// ```
+    pub fn file(&self) -> ChessFile {
+        self.0
+    }
+
+    /// Returns the rank of the chess square.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{ChessSquare, ChessFile, ChessRank};
+    /// let square = ChessSquare::new(ChessFile::E, ChessRank::Four);
+    /// assert_eq!(square.rank().to_int(), 4);
+    /// ```
+    pub fn rank(&self) -> ChessRank {
+        self.1
+    }
+}
+
+impl std::fmt::Display for ChessSquare {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}{}", self.0.to_char(), self.1.to_char())?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_from_san_valid() {
+        ('a'..='h').for_each(|file| {
+            ('1'..='8').for_each(|rank| {
+                let san = format!("{}{}", file, rank);
+                let square = ChessSquare::from_coords(&san).unwrap();
+                assert_eq!(square.to_string(), san);
+            });
+        });
+    }
+
+    #[test]
+    fn test_from_san_invalid() {
+        let invalid_sans = vec!["", "a", "1", "i4", "e9", "e", "44", "ee", "a0", "hh"];
+        for san in invalid_sans {
+            assert!(ChessSquare::from_coords(san).is_err());
+        }
+    }
+
+    #[test]
+    fn test_to_string() {
+        let square = ChessSquare::new(ChessFile::E, ChessRank::Four);
+        assert_eq!(square.to_string(), "e4");
+        let square = ChessSquare::new(ChessFile::A, ChessRank::One);
+        assert_eq!(square.to_string(), "a1");
+        let square = ChessSquare::new(ChessFile::H, ChessRank::Eight);
+        assert_eq!(square.to_string(), "h8");
+    }
+
+    #[test]
+    fn test_to_coords() {
+        ('a'..='h').for_each(|file| {
+            ('1'..='8').for_each(|rank| {
+                let f = ChessFile::from_char(file).unwrap();
+                let r = ChessRank::from_char(rank).unwrap();
+                let square = ChessSquare::new(f, r);
+                let san = format!("{}{}", file, rank);
+                assert_eq!(square.to_coords(), san);
+            });
+        });
+    }
+
+    #[test]
+    fn test_file_and_rank() {
+        ('a'..='h').for_each(|file| {
+            ('1'..='8').for_each(|rank| {
+                let san = format!("{}{}", file, rank);
+                let square = ChessSquare::from_coords(&san).unwrap();
+                assert_eq!(square.file().to_char(), file);
+                assert_eq!(square.rank().to_char(), rank);
+            });
+        });
+    }
+
+    #[test]
+    fn test_eq() {
+        let sq1 = ChessSquare::new(ChessFile::E, ChessRank::Four);
+        let sq2 = ChessSquare::new(ChessFile::E, ChessRank::Four);
+        let sq3 = ChessSquare::new(ChessFile::D, ChessRank::Four);
+        assert_eq!(sq1, sq2);
+        assert_ne!(sq1, sq3);
+    }
+}
+</file>
+
+<file path="src/domain/chess/mod.rs">
+pub mod chess_file;
+pub mod chess_piece_type;
+pub mod chess_rank;
+pub mod chess_square;
+pub mod uci_move;
+
+pub use chess_file::ChessFile;
+pub use chess_piece_type::ChessPieceType;
+pub use chess_rank::ChessRank;
+pub use chess_square::ChessSquare;
+pub use uci_move::UciMove;
+</file>
+
 <file path="src/domain/candidate_request.rs">
 use super::fen_key::FenKey;
+use crate::domain::{Centipawns, PlayRate};
+use derive_builder::Builder;
+
+#[derive(Clone, Debug, Builder)]
+pub struct CandidateRequest {
+    #[builder(default = "FenKey::starting_position()")]
+    pub fen_key: FenKey,
+    #[builder(default = "5")]
+    pub max_candidates: usize,
+    #[builder(default = "Centipawns::from_int(0)")]
+    pub cp_window: Centipawns,
+    #[builder(default = "PlayRate::new(0.0)")]
+    pub min_play_rate: PlayRate,
+    #[builder(default = "1")]
+    pub multipv: usize,
+}
+
+impl CandidateRequest {
+    /// Create a new CandidateRequest with specified parameters.
+    /// # Arguments
+    /// * `fen_key` - The FenKey representing the position.
+    /// * `max_candidates` - Maximum number of candidate moves to request.
+    /// * `cp_window` - Centipawn window for move quality filtering.
+    /// * `min_play_rate` - Minimum play rate for move popularity filtering.
+    /// * `multipv` - Number of principal variations to request from the engine.
+    /// # Returns
+    /// * `CandidateRequest` - The constructed CandidateRequest.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::{CandidateRequest, Centipawns, PlayRate};
+    /// use repgrow::domain::FenKey;
+    /// let fen_key = FenKey::starting_position();
+    /// let req = CandidateRequest::new(fen_key, 10, Centipawns::from_int(50), PlayRate::new(0.05), 3);
+    /// assert_eq!(req.fen_key.fen_string, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
+    /// assert_eq!(req.fen_key.side_to_move.to_string(), "white".to_string());
+    /// assert_eq!(req.max_candidates, 10);
+    /// assert_eq!(req.cp_window, Centipawns::from_int(50));
+    /// assert_eq!(req.min_play_rate, PlayRate::new(0.05));
+    /// assert_eq!(req.multipv, 3);
+    /// ```
+    pub fn new(
+        fen_key: FenKey,
+        max_candidates: usize,
+        cp_window: Centipawns,
+        min_play_rate: PlayRate,
+        multipv: usize,
+    ) -> Self {
+        Self {
+            fen_key,
+            max_candidates,
+            cp_window,
+            min_play_rate,
+            multipv,
+        }
+    }
+}
+</file>
+
+<file path="src/domain/centipawns.rs">
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize, PartialOrd)]
+pub struct Centipawns(f32);
+
+impl Centipawns {
+    /// Creates a new Centipawns instance.
+    /// # Arguments
+    /// * `value` - The centipawn value as a float.
+    /// # Returns
+    /// * `Centipawns` - A new Centipawns instance.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::Centipawns;
+    /// let cp = Centipawns::new(42.0);
+    /// assert_eq!(cp.value(), 42.0);
+    /// let cp_neg = Centipawns::new(-15.5);
+    /// assert_eq!(cp_neg.value(), -15.5);
+    /// ```
+    pub fn new(value: f32) -> Self {
+        Centipawns(value)
+    }
+
+    /// Creates a Centipawns instance from an integer value.
+    /// # Arguments
+    /// * `value` - The centipawn value as an integer.
+    /// # Returns
+    /// * `Centipawns` - A new Centipawns instance.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::Centipawns;
+    /// let cp = Centipawns::from_int(100);
+    /// assert_eq!(cp.value(), 100.0);
+    /// let cp_neg = Centipawns::from_int(-50);
+    /// assert_eq!(cp_neg.value(), -50.0);
+    /// ```
+    pub fn from_int(value: i32) -> Self {
+        Centipawns(value as f32)
+    }
+
+    /// Alias for `new`.
+    /// # Arguments
+    /// * `value` - The centipawn value as a float.
+    /// # Returns
+    /// * `Centipawns` - A new Centipawns instance.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::Centipawns;
+    /// let cp = Centipawns::from_float(75.5);
+    /// assert_eq!(cp.value(), 75.5);
+    /// let cp_neg1 = Centipawns::from_float(-20.0);
+    /// let cp_neg2 = Centipawns::new(-20.0);
+    /// assert_eq!(cp_neg1, cp_neg2);
+    /// ```
+    pub fn from_float(value: f32) -> Self {
+        Centipawns::new(value)
+    }
+
+    /// Returns the inner float value.
+    /// # Returns
+    /// * `f32` - The centipawn value.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::Centipawns;
+    /// let cp = Centipawns::new(42.0);
+    /// assert_eq!(cp.value(), 42.0);
+    /// let cp_neg = Centipawns::new(-15.5);
+    /// assert_eq!(cp_neg.value(), -15.5);
+    /// ```
+    pub fn value(&self) -> f32 {
+        self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_centipawns() {
+        let cp = Centipawns::new(42.0);
+        assert_eq!(cp.value(), 42.0);
+    }
+
+    #[test]
+    fn test_centipawns_negative() {
+        let cp = Centipawns::new(-15.5);
+        assert_eq!(cp.value(), -15.5);
+    }
+
+    #[test]
+    fn test_centipawns_can_be_serialized() {
+        let cp = Centipawns::new(10.0);
+        let serialized = serde_json::to_string(&cp).unwrap();
+        assert_eq!(serialized, "10.0");
+    }
+
+    #[test]
+    fn test_centipawns_can_be_deserialized() {
+        let data = "25.5";
+        let cp: Centipawns = serde_json::from_str(data).unwrap();
+        assert_eq!(cp.value(), 25.5);
+    }
+}
+</file>
+
+<file path="src/domain/eval_line.rs">
+use serde::{Deserialize, Serialize};
+
+use crate::domain::{Centipawns, chess::UciMove};
+
+/// Convenience struct returned by specialized providers before normalization.
+/// EvalLine represents a single move evaluation from a chess engine.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EvalLine {
+    pub uci: UciMove,
+    pub eval_cp: Centipawns,
+    pub depth: u8,
+}
+</file>
+
+<file path="src/domain/popularity_row.rs">
+use crate::domain::{PlayRate, chess::UciMove};
 
 #[derive(Clone, Debug)]
-pub struct CandidateRequest {
-    pub fen_key: FenKey,
-    pub max_candidates: usize,
-    pub cp_window: f32,     // for quality
-    pub min_play_rate: f32, // for popularity
-    pub multipv: usize,     // for quality
+pub struct PopularityRow {
+    pub uci: UciMove,
+    pub play_rate: PlayRate,
+    pub games: u32,
+}
+</file>
+
+<file path="src/domain/uci.rs">
+use crate::domain::chess::{ChessPieceType, ChessSquare};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UciMove {
+    pub from: ChessSquare,
+    pub to: ChessSquare,
+    pub promotion: Option<ChessPieceType>,
+}
+
+/// Error type for UCI move parsing failures.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UciMoveParseError;
+
+impl UciMove {
+    /// Creates a new UciMove.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{UciMove, ChessSquare, ChessFile, ChessRank, ChessPieceType};
+    /// let from_sq = ChessSquare::new(ChessFile::E, ChessRank::Two);
+    /// let to_sq = ChessSquare::new(ChessFile::E, ChessRank::Four);
+    /// let uci_move = UciMove::new(from_sq, to_sq, None);
+    /// assert_eq!(uci_move.from, from_sq);
+    /// assert_eq!(uci_move.to, to_sq);
+    /// assert_eq!(uci_move.promotion, None);
+    /// ```
+    pub fn new(from: ChessSquare, to: ChessSquare, promotion: Option<ChessPieceType>) -> Self {
+        Self {
+            from,
+            to,
+            promotion,
+        }
+    }
+
+    /// Parses a UCI move string (e.g., "e2e4", "e7e8q") into a `UciMove`.
+    ///
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{UciMove, ChessSquare, ChessFile, ChessRank, ChessPieceType};
+    /// use repgrow::domain::chess::uci_move::UciMoveParseError;
+    /// let from_sq = ChessSquare::from_coords("e2").unwrap();
+    /// let to_sq = ChessSquare::from_coords("e4").unwrap();
+    /// let uci_move = UciMove::new(from_sq, to_sq, None);
+    /// assert_eq!(UciMove::from_uci("e2e4"), Ok(uci_move));
+    /// assert_eq!(UciMove::from_uci("e7e8q"), Ok(UciMove {
+    ///     from: ChessSquare::new(ChessFile::E, ChessRank::Seven),
+    ///     to: ChessSquare::new(ChessFile::E, ChessRank::Eight),
+    ///     promotion: Some(ChessPieceType::Queen),
+    /// }));
+    /// assert_eq!(UciMove::from_uci("a7a8n"), Ok(UciMove {
+    ///     from: ChessSquare::new(ChessFile::A, ChessRank::Seven),
+    ///     to: ChessSquare::new(ChessFile::A, ChessRank::Eight),
+    ///     promotion: Some(ChessPieceType::Knight),
+    /// }));
+    /// ```
+    pub fn from_uci(s: &str) -> Result<Self, UciMoveParseError> {
+        if s.len() < 4 || s.len() > 5 {
+            return Err(UciMoveParseError);
+        }
+        let from_square =
+            ChessSquare::extract_uci_from_square(s).expect("Failed to extract from square");
+        let to_square = ChessSquare::extract_uci_to_square(s).expect("Failed to extract to square");
+        let promotion_piece = ChessPieceType::from_uci_string(s);
+
+        // Validate promotion rules
+        if let Some(promo) = promotion_piece {
+            // Promotion can only occur when moving to the last rank
+            let is_white_pawn = from_square.rank().to_int() == 7 && to_square.rank().to_int() == 8;
+            let is_black_pawn = from_square.rank().to_int() == 2 && to_square.rank().to_int() == 1;
+            let is_pawn_promotion = is_white_pawn || is_black_pawn;
+            if !is_pawn_promotion {
+                let err_msg = format!(
+                    "Invalid promotion move: {:?} to {:?} with promotion to {:?}.\nPromotion can only occur when a pawn reaches the last rank, so it must start from one rank before.",
+                    from_square.to_coords(),
+                    to_square.to_coords(),
+                    promo
+                );
+                eprintln!("{}", err_msg);
+                return Err(UciMoveParseError);
+            }
+
+            // Ensure the piece being promoted to is valid
+            match promo {
+                ChessPieceType::Queen
+                | ChessPieceType::Rook
+                | ChessPieceType::Bishop
+                | ChessPieceType::Knight => {}
+                _ => return Err(UciMoveParseError),
+            }
+
+            Ok(UciMove::new(from_square, to_square, Some(promo)))
+        } else {
+            Ok(UciMove::new(from_square, to_square, None))
+        }
+    }
+
+    /// Converts the UciMove back to its UCI string representation.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::{UciMove, ChessSquare, ChessFile, ChessRank, ChessPieceType};
+    /// let uci_move = UciMove::new(
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Two),
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Four),
+    ///     None,
+    /// );
+    /// assert_eq!(uci_move.to_uci(), "e2e4");
+    /// let uci_with_promo = UciMove::new(
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Seven),
+    ///     ChessSquare::new(ChessFile::E, ChessRank::Eight),
+    ///     Some(ChessPieceType::Queen),
+    /// );
+    /// assert_eq!(uci_with_promo.to_uci(), "e7e8q");
+    /// ```
+    pub fn to_uci(&self) -> String {
+        let mut uci_str = format!("{}{}", self.from.to_coords(), self.to.to_coords());
+        if let Some(promo) = self.promotion {
+            uci_str.push(promo.to_char().to_ascii_lowercase());
+        }
+        uci_str
+    }
+}
+</file>
+
+<file path="src/infra/cache/mem_cache.rs">
+use async_trait::async_trait;
+use moka::future::Cache;
+use std::{fmt::Debug, hash::Hash, sync::Arc, time::Duration};
+
+use crate::infra::cache::kv_cache::KvCache;
+
+/// Moka-backed in-memory cache.
+#[derive(Debug)]
+pub struct MemCache<K, V>
+where
+    K: Eq + Hash + Send + Sync + Debug + Clone + 'static,
+    V: Send + Sync + Debug + 'static,
+{
+    inner: Cache<K, Arc<V>>,
+}
+
+impl<K, V> MemCache<K, V>
+where
+    K: Eq + Hash + Clone + Send + Sync + Debug + 'static,
+    V: Send + Sync + Debug + 'static,
+{
+    pub fn new(capacity: u64, ttl_secs: u64) -> Self {
+        let inner = Cache::builder()
+            .max_capacity(capacity)
+            .time_to_live(Duration::from_secs(ttl_secs))
+            .build();
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl<K, V> KvCache<K, V> for MemCache<K, V>
+where
+    K: Eq + Hash + Clone + Send + Sync + Debug + 'static,
+    V: Send + Sync + Debug + 'static,
+{
+    async fn get(&self, k: &K) -> Option<Arc<V>> {
+        self.inner.get(k).await
+    }
+    async fn put(&self, k: K, v: Arc<V>) {
+        self.inner.insert(k, v).await;
+    }
+}
+</file>
+
+<file path="src/infra/cache/mod.rs">
+pub mod kv_cache;
+pub mod mem_cache;
+
+pub use kv_cache::KvCache;
+pub use mem_cache::MemCache;
+</file>
+
+<file path="src/infra/rate/mod.rs">
+use governor::{
+    clock::DefaultClock, state::InMemoryState, state::NotKeyed, Quota, RateLimiter as GovLimiter,
+};
+use std::{num::NonZeroU32, sync::Arc};
+
+/// Minimal rate-limiter interface.
+#[derive(Clone, Debug)]
+pub struct RateLimiter {
+    inner: Arc<GovLimiter<NotKeyed, InMemoryState, DefaultClock>>,
+}
+
+impl RateLimiter {
+    pub fn per_sec(n: u32) -> Self {
+        let q = Quota::per_second(NonZeroU32::new(n.max(1)).unwrap());
+        Self {
+            inner: Arc::new(GovLimiter::<NotKeyed, InMemoryState, DefaultClock>::direct(
+                q,
+            )),
+        }
+    }
+    pub async fn acquire(&self) {
+        use governor::Jitter;
+        let _ = self
+            .inner
+            .until_ready_with_jitter(Jitter::up_to(std::time::Duration::from_millis(30)))
+            .await;
+    }
+}
+</file>
+
+<file path="src/infra/scheduler/mod.rs">
+use async_trait::async_trait;
+use tokio::sync::mpsc;
+
+#[async_trait]
+pub trait TaskScheduler: Send + Sync {
+    async fn spawn<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static;
+    fn channel<T: Send + 'static>(&self, cap: usize) -> (mpsc::Sender<T>, mpsc::Receiver<T>);
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct TokioScheduler;
+
+#[async_trait]
+impl TaskScheduler for TokioScheduler {
+    async fn spawn<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        tokio::spawn(fut);
+    }
+    fn channel<T: Send + 'static>(&self, cap: usize) -> (mpsc::Sender<T>, mpsc::Receiver<T>) {
+        mpsc::channel(cap)
+    }
+}
+</file>
+
+<file path="src/pgn/mod.rs">
+pub mod pgn_writer;
+pub mod repertoire_writer;
+pub mod uci_str;
+
+pub use pgn_writer::PgnWriter;
+pub use repertoire_writer::RepertoireWriter;
+pub use uci_str::UciStr;
+</file>
+
+<file path="src/pgn/pgn_writer.rs">
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{PieceColor, RepertoireNode, chess::UciMove, fen_key::FenKey};
+
+    /// Helper to build a node with children
+    fn node(
+        id: u64,
+        parent: Option<u64>,
+        fen: &str,
+        color: PieceColor,
+        uci: Option<UciMove>,
+        ply: u32,
+        children: Vec<u64>,
+    ) -> RepertoireNode {
+        RepertoireNode {
+            id,
+            parent,
+            fen_key: FenKey::new(fen.to_string(), color),
+            last_move_uci: uci,
+            ply_depth: ply,
+            children,
+            signals: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_single_mainline() {
+        // 1. e4 e5 2. Nf3 Nc6
+        let n0 = node(0, None, "startpos", PieceColor::White, None, 0, vec![1]);
+        let n1 = node(
+            1,
+            Some(0),
+            "fen1",
+            PieceColor::Black,
+            Some(UciMove::from_uci("e2e4").unwrap()),
+            1,
+            vec![2],
+        );
+        let n2 = node(
+            2,
+            Some(1),
+            "fen2",
+            PieceColor::White,
+            Some(UciMove::from_uci("e7e5").unwrap()),
+            2,
+            vec![3],
+        );
+        let n3 = node(
+            3,
+            Some(2),
+            "fen3",
+            PieceColor::Black,
+            Some(UciMove::from_uci("g1f3").unwrap()),
+            3,
+            vec![4],
+        );
+        let n4 = node(
+            4,
+            Some(3),
+            "fen4",
+            PieceColor::White,
+            Some(UciMove::from_uci("b8c6").unwrap()),
+            4,
+            vec![],
+        );
+        let nodes = vec![n0.clone(), n1, n2, n3, n4];
+        let writer = PgnWriter;
+        let pgn = writer.write_with_nodes(&n0, &nodes).unwrap();
+        assert!(pgn.contains("1. e2e4 2. e7e5 3. g1f3 4. b8c6"));
+    }
+
+    #[test]
+    fn test_variations() {
+        // 1. e4 (1. d4)
+        let n0 = node(0, None, "startpos", PieceColor::White, None, 0, vec![1, 2]);
+        let n1 = node(
+            1,
+            Some(0),
+            "fen1",
+            PieceColor::Black,
+            Some(UciMove::from_uci("e2e4").unwrap()),
+            1,
+            vec![],
+        );
+        let n2 = node(
+            2,
+            Some(0),
+            "fen2",
+            PieceColor::Black,
+            Some(UciMove::from_uci("d2d4").unwrap()),
+            1,
+            vec![],
+        );
+        let nodes = vec![n0.clone(), n1, n2];
+        let writer = PgnWriter;
+        let pgn = writer.write_with_nodes(&n0, &nodes).unwrap();
+        assert!(pgn.contains("1. e2e4 (1. d2d4)"));
+    }
+
+    #[test]
+    fn test_empty_tree() {
+        let n0 = node(0, None, "startpos", PieceColor::White, None, 0, vec![]);
+        let writer = PgnWriter;
+        let pgn = writer.write_with_nodes(&n0, &[n0.clone()]).unwrap();
+        assert!(pgn.contains("*") && !pgn.contains("1."));
+    }
+
+    #[test]
+    fn test_non_starting_fen() {
+        let n0 = node(
+            0,
+            None,
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1",
+            PieceColor::Black,
+            None,
+            0,
+            vec![],
+        );
+        let writer = PgnWriter;
+        let pgn = writer.write_with_nodes(&n0, &[n0.clone()]).unwrap();
+        assert!(pgn.contains("[FEN \"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1\"]"));
+    }
+
+    #[test]
+    fn test_question_mark_for_missing_move() {
+        let n0 = node(0, None, "startpos", PieceColor::White, None, 0, vec![1]);
+        let n1 = node(1, Some(0), "fen1", PieceColor::Black, None, 1, vec![]);
+        let nodes = vec![n0.clone(), n1];
+        let writer = PgnWriter;
+        let pgn = writer.write_with_nodes(&n0, &nodes).unwrap();
+        assert!(pgn.contains("1. ?"));
+    }
+}
+use crate::{domain::RepertoireNode, pgn::RepertoireWriter};
+
+/// PGN writer that traverses the repertoire tree and outputs moves in PGN format.
+/// Supports mainline, variations, and emits FEN tag if not starting position.
+#[derive(Default)]
+pub struct PgnWriter;
+
+impl PgnWriter {
+    /// Recursively writes moves from the repertoire tree in PGN format.
+    /// Returns a tuple: (PGN move string, number of plies written)
+    pub fn write_with_nodes(
+        &self,
+        root: &RepertoireNode,
+        nodes: &[RepertoireNode],
+    ) -> anyhow::Result<String> {
+        let mut pgn = String::from("[Event \"Repertoire\"]\n");
+        if root.fen_key.fen_string != "startpos" {
+            pgn += &format!("[FEN \"{}\"]\n", root.fen_key.fen_string);
+        }
+        pgn += "\n";
+        let (moves, _) = self.write_moves(root, nodes, root.ply_depth);
+        pgn += &moves;
+        pgn += " *\n";
+        Ok(pgn)
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn write_moves(
+        &self,
+        node: &RepertoireNode,
+        nodes: &[RepertoireNode],
+        mut ply: u32,
+    ) -> (String, u32) {
+        let mut pgn = String::new();
+        let mut current = node;
+        while !current.children.is_empty() {
+            // Mainline: first child
+            let child_id = current.children[0];
+            let child = nodes.iter().find(|n| n.id == child_id);
+            if let Some(child) = child {
+                ply += 1;
+                // Output ply number and move
+                if current.fen_key.side_to_move.is_white() {
+                    pgn += &format!("{}.", ply.div_ceil(2));
+                }
+                if let Some(ref uci) = child.last_move_uci {
+                    pgn += &format!(" {}", uci.to_uci());
+                } else {
+                    pgn += " ?";
+                }
+                // Handle variations (other children)
+                if current.children.len() > 1 {
+                    for &var_id in &current.children[1..] {
+                        let var_node = nodes.iter().find(|n| n.id == var_id);
+                        if let Some(var_node) = var_node {
+                            let (var_pgn, _) = self.write_moves(var_node, nodes, ply);
+                            pgn += &format!(" ({})", var_pgn.trim());
+                        }
+                    }
+                }
+                current = child;
+            } else {
+                // Child not found, output ? and break
+                pgn += " ?";
+                break;
+            }
+        }
+        (pgn, ply)
+    }
+}
+
+impl RepertoireWriter for PgnWriter {
+    /// Writes the repertoire tree to PGN format using only the root node (legacy interface).
+    /// For full traversal, use write_with_nodes.
+    fn write(&self, root: &RepertoireNode) -> anyhow::Result<String> {
+        self.write_with_nodes(root, &[root.clone()])
+    }
+}
+</file>
+
+<file path="src/pgn/repertoire_writer.rs">
+use crate::domain::RepertoireNode;
+use anyhow::Result;
+
+/// Writer interface for alternate outputs later (JSON, DB, etc.)
+pub trait RepertoireWriter {
+    fn write(&self, root: &RepertoireNode) -> Result<String>;
+}
+</file>
+
+<file path="src/policy/split_side_policy.rs">
+use shakmaty::Color;
+
+use crate::{
+    domain::{CandidateRequest, Centipawns, PlayRate},
+    policy::{Decision, MovePolicy},
+};
+
+/// Default: my side → quality (engine); opponent → popularity (explorer)
+pub struct SideSplitPolicy {
+    my_side: Color,
+    cp_window: Centipawns,
+    min_play_rate: PlayRate,
+}
+
+impl SideSplitPolicy {
+    pub fn new(my_side: Color, cp_window: Centipawns, min_play_rate: PlayRate) -> Self {
+        Self {
+            my_side,
+            cp_window,
+            min_play_rate,
+        }
+    }
+}
+
+impl MovePolicy for SideSplitPolicy {
+    fn decide(&self, stm: Color) -> Decision {
+        if stm == self.my_side {
+            Decision::Quality
+        } else {
+            Decision::Popularity
+        }
+    }
+    fn adjust(&self, req: &mut CandidateRequest, is_my_side: bool) {
+        if is_my_side {
+            req.cp_window = self.cp_window;
+        } else {
+            req.min_play_rate = self.min_play_rate;
+        }
+    }
+}
+</file>
+
+<file path="src/provider/quality_caps.rs">
+pub struct QualityCaps {
+    pub max_multipv: usize,
+}
+
+impl Default for QualityCaps {
+    fn default() -> Self {
+        Self { max_multipv: 10 }
+    }
+}
+</file>
+
+<file path="src/provider/types.rs">
+use crate::domain::{CandidateMove, EvalLine};
+
+pub type CandidateMoves = Vec<CandidateMove>;
+pub type EvalLines = Vec<EvalLine>;
+</file>
+
+<file path="src/search/arena/mem_arena.rs">
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use crate::{domain::RepertoireNode, search::arena::NodeArenaStore};
+
+/// In-memory arena backed by Arc<Mutex<Vec<RepertoireNode>>>
+#[derive(Clone, Default)]
+pub struct MemArena {
+    inner: Arc<Mutex<Vec<RepertoireNode>>>,
+}
+
+impl MemArena {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+    /// Returns a clone of all nodes currently in the arena.
+    pub async fn all_nodes(&self) -> Vec<RepertoireNode> {
+        let g = self.inner.lock().await;
+        g.clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl NodeArenaStore for MemArena {
+    async fn len(&self) -> usize {
+        self.inner.lock().await.len()
+    }
+
+    async fn get(&self, id: u64) -> Option<RepertoireNode> {
+        self.inner.lock().await.get(id as usize).cloned()
+    }
+
+    async fn push(&self, node: RepertoireNode) -> u64 {
+        let mut g = self.inner.lock().await;
+        let id = g.len() as u64;
+        let mut n = node;
+        n.id = id;
+        g.push(n);
+        id
+    }
+
+    async fn push_child(&self, parent: u64, child_id: u64) {
+        let mut g = self.inner.lock().await;
+        if let Some(p) = g.get_mut(parent as usize) {
+            p.children.push(child_id);
+        }
+    }
+}
+</file>
+
+<file path="src/search/build/mod.rs">
+pub mod make_node;
+pub mod start_from_san;
+
+pub use make_node::make_node;
+pub use start_from_san::start_from_san;
+</file>
+
+<file path="src/search/build/start_from_san.rs">
+use crate::domain::{FenKey, PieceColor};
+use anyhow::{anyhow, Result};
+use shakmaty::{fen::Fen, san::San, Chess, Color, EnPassantMode, Position};
+
+/// Parse SAN into starting FEN (and side to move)
+pub fn start_from_san(san_line: Option<&str>) -> Result<(FenKey, Color)> {
+    let mut pos = Chess::default();
+    if let Some(line) = san_line {
+        for tok in line.split_whitespace() {
+            if tok.contains('.') {
+                continue;
+            }
+            let san: San = tok.parse().map_err(|_| anyhow!("bad SAN: {tok}"))?;
+            let mv = san
+                .to_move(&pos)
+                .map_err(|_| anyhow!("illegal SAN: {tok}"))?;
+            pos.play_unchecked(&mv);
+        }
+    }
+    let fen = Fen::from_position(pos.clone(), EnPassantMode::Legal).to_string();
+    let stm = pos.turn();
+    Ok((
+        FenKey {
+            fen_string: fen,
+            side_to_move: PieceColor::from_shakmaty(stm),
+        },
+        stm,
+    ))
+}
+</file>
+
+<file path="src/search/util.rs">
+use crate::domain::{FenKey, PieceColor};
+use anyhow::{Error, Result, anyhow};
+use shakmaty::CastlingMode;
+use shakmaty::{Chess, EnPassantMode, Position, fen::Fen, uci::Uci};
+
+pub fn apply_uci(fen_key: &FenKey, uci: &str) -> Result<(FenKey, shakmaty::Color)> {
+    let position: Chess = extract_position_from_fen_key(fen_key)?;
+    let extracted_move = extract_move_from_parsed_uci_and_position(uci, &position)?;
+
+    let mut next = position.clone();
+    next.play_unchecked(&extracted_move);
+    let next_fen = Fen::from_position(next.clone(), EnPassantMode::Legal).to_string();
+    Ok((
+        FenKey {
+            fen_string: next_fen,
+            side_to_move: PieceColor::from_shakmaty(next.turn()),
+        },
+        next.turn(),
+    ))
+}
+
+pub fn extract_move_from_parsed_uci_and_position(
+    uci: &str,
+    position: &Chess,
+) -> Result<shakmaty::Move, Error> {
+    uci.parse::<Uci>()
+        .map_err(|_| anyhow!("bad UCI"))?
+        .to_move(position)
+        .map_err(|_| anyhow!("illegal UCI"))
+}
+
+pub fn extract_position_from_fen_key(fen_key: &FenKey) -> Result<Chess, Error> {
+    Ok(fen_key
+        .fen_string
+        .parse::<Fen>()?
+        .into_position(CastlingMode::Standard)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shakmaty::Color;
+
+    #[test]
+    fn test_extract_position_from_fen_key() {
+        let fen_key = FenKey {
+            fen_string: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
+            side_to_move: PieceColor::White,
+        };
+        let position = extract_position_from_fen_key(&fen_key).unwrap();
+        assert_eq!(position.turn(), Color::White);
+    }
+}
+</file>
+
+<file path="src/cli.rs">
+use clap::Parser;
+
+/// CLI for building a repertoire PGN by composing quality and popularity providers.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct Cli {
+    /// Path to config TOML
+    #[arg(long, default_value = "src/config/default_config.toml")]
+    pub config: Option<String>,
+    /// Side for which to optimize (white|black)
+    #[arg(long)]
+    pub side: String,
+    /// Ply budget
+    #[arg(long)]
+    pub plies: u32,
+    /// Starting moves in SAN (e.g., "1.e4 e5 2.Nf3 Nc6")
+    #[arg(long)]
+    pub start: Option<String>,
+    /// Output PGN path
+    #[arg(long, default_value = "repertoire.pgn")]
+    pub out: String,
+}
+</file>
+
+<file path=".gitignore">
+/target
+src/search/orchestrator.rs
+repomix.config.json
+repomix-output.xml
+.repomixignore
+Cargo.lock
+</file>
+
+<file path="src/config/cache_config.rs">
+use crate::config::load_default_config;
+
+use super::toml_utils::load_config_type_from_file;
+use anyhow::Result;
+use derive_builder::Builder;
+use serde::Deserialize;
+
+/// Cache configuration.
+/// - `entries`: Maximum number of entries in the cache (default: 200,000).
+/// - `ttl_secs`: Time-to-live for cache entries in seconds (default: 3,600).
+///
+/// # Examples
+/// ```
+/// use repgrow::config::CacheConfig;
+///
+/// let cfg = CacheConfig::default();
+/// assert_eq!(cfg.entries, 200000);
+/// assert_eq!(cfg.ttl_secs, 3600);
+///
+/// let built_cfg = CacheConfig::builder()
+///     .entries(500000)
+///     .ttl_secs(3900)
+///     .build()
+///     .unwrap();
+/// assert_eq!(built_cfg.entries, 500000);
+/// assert_eq!(built_cfg.ttl_secs, 3900);
+/// ```
+#[derive(Debug, Clone, Deserialize, Builder)]
+pub struct CacheConfig {
+    #[builder(default = "200000")]
+    pub entries: u64,
+    #[builder(default = "3600")]
+    pub ttl_secs: u64,
+}
+
+impl CacheConfig {
+    /// Load CacheConfig from a TOML file.
+    /// # Arguments
+    /// * `filename` - Path to the TOML configuration file.
+    /// # Returns
+    /// * `Result<CacheConfig>` - Loaded CacheConfig or an error.
+    ///
+    /// # Examples
+    /// ```
+    /// use repgrow::config::CacheConfig;
+    /// let cfg_path = "src/config/default_config.toml";
+    /// let cfg = CacheConfig::load(cfg_path).unwrap();
+    /// assert_eq!(cfg.entries, 200000);
+    /// assert_eq!(cfg.ttl_secs, 3600);
+    /// ```
+    pub fn load(filename: &str) -> Result<Self> {
+        load_config_type_from_file(filename, "cache").and_then(|cfg| match cfg {
+            super::toml_utils::ConfigTypes::Cache(c) => Ok(c),
+            _ => Err(anyhow::anyhow!("Expected CacheConfig")),
+        })
+    }
+
+    /// Create a builder for CacheConfig.
+    /// # Returns
+    /// * `CacheConfigBuilder` - A builder for CacheConfig.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::CacheConfig;
+    /// let cfg = CacheConfig::builder()
+    ///     .entries(2000)
+    ///     .ttl_secs(300)
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(cfg.entries, 2000);
+    /// assert_eq!(cfg.ttl_secs, 300);
+    /// ```
+    pub fn builder() -> CacheConfigBuilder {
+        CacheConfigBuilder::default()
+    }
+}
+
+impl Default for CacheConfig {
+    /// Load the default CacheConfig from the default configuration file.
+    /// # Returns
+    /// * `CacheConfig` - The default CacheConfig.
+    /// # Panics
+    /// Panics if the default configuration file cannot be loaded.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::CacheConfig;
+    /// let cfg = CacheConfig::default();
+    /// assert_eq!(cfg.entries, 200000);
+    /// assert_eq!(cfg.ttl_secs, 3600);
+    /// ```
+    fn default() -> Self {
+        load_default_config()
+            .expect("Failed to load default config")
+            .cache
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_from_toml() {
+        let default_config = "src/config/default_config.toml".to_string();
+        let cfg = CacheConfig::load(&default_config).unwrap();
+        assert_eq!(cfg.entries, 200000);
+        assert_eq!(cfg.ttl_secs, 3600);
+    }
+
+    #[test]
+    fn test_default() {
+        let cfg = CacheConfig::default();
+        assert_eq!(cfg.entries, 200000);
+        assert_eq!(cfg.ttl_secs, 3600);
+    }
+
+    #[test]
+    fn test_builder() {
+        let cfg = CacheConfigBuilder::default().build().unwrap();
+        assert_eq!(cfg.entries, 200000);
+        assert_eq!(cfg.ttl_secs, 3600);
+    }
+
+    #[test]
+    fn test_builder_default_override() {
+        let cfg = CacheConfigBuilder::default()
+            .entries(100000)
+            .ttl_secs(1800)
+            .build()
+            .unwrap();
+        assert_eq!(cfg.entries, 100000);
+        assert_eq!(cfg.ttl_secs, 1800);
+    }
+
+    #[test]
+    fn test_debug_clone_deserialize() {
+        let cfg1 = CacheConfigBuilder::default().build().unwrap();
+        let cfg2 = cfg1.clone();
+        assert_eq!(cfg1.entries, cfg2.entries);
+        assert_eq!(cfg1.ttl_secs, cfg2.ttl_secs);
+
+        let toml_str = r#"entries = 200000
+ttl_secs = 3600"#;
+        let cfg3: CacheConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg1.entries, cfg3.entries);
+        assert_eq!(cfg1.ttl_secs, cfg3.ttl_secs);
+    }
+}
+</file>
+
+<file path="src/config/http_config.rs">
+use super::toml_utils::{load_config_type_from_file, ConfigTypes};
+use anyhow::{anyhow, Result};
+use derive_builder::Builder;
+use serde::Deserialize;
+
+/// HTTP configuration.
+/// - `timeout_ms`: Timeout for HTTP requests in milliseconds (default: 9,000).
+/// - `retries`: Number of retries for failed requests (default: 3).
+/// - `rate_per_sec_cloud`: Rate limit for requests to the cloud analysis service in requests per second (default: 2).
+/// - `rate_per_sec_explorer`: Rate limit for requests to the explorer service in requests per second (default: 4).
+#[derive(Debug, Clone, Deserialize, Builder)]
+pub struct HttpConfig {
+    /// Timeout for HTTP requests in milliseconds.
+    #[builder(default = "9000")]
+    pub timeout_ms: u64,
+    /// Number of retries for failed requests.
+    #[builder(default = "3")]
+    pub retries: u32,
+    /// Rate limit for requests to the cloud analysis service (requests per second).
+    #[builder(default = "2")]
+    pub rate_per_sec_cloud: u32,
+    /// Rate limit for requests to the explorer service (requests per second).
+    #[builder(default = "4")]
+    pub rate_per_sec_explorer: u32,
+}
+
+impl HttpConfig {
+    /// Load HttpConfig from a TOML file.
+    /// # Arguments
+    /// * `filename` - Path to the TOML configuration file.
+    /// # Returns
+    /// * `Result<HttpConfig>` - Loaded HttpConfig or an error.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::HttpConfig;
+    /// let cfg_path = "src/config/default_config.toml";
+    /// let cfg = HttpConfig::load(cfg_path).unwrap();
+    /// assert_eq!(cfg.timeout_ms, 9000);
+    /// assert_eq!(cfg.retries, 3);
+    /// assert_eq!(cfg.rate_per_sec_cloud, 2);
+    /// assert_eq!(cfg.rate_per_sec_explorer, 4);
+    /// ```
+    pub fn load(filename: &str) -> Result<Self> {
+        load_config_type_from_file(filename, "http").and_then(|cfg| match cfg {
+            ConfigTypes::Http(c) => Ok(c),
+            _ => Err(anyhow!("Expected HttpConfig")),
+        })
+    }
+
+    /// Create a builder for HttpConfig.
+    /// # Returns
+    /// * `HttpConfigBuilder` - A builder for HttpConfig.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::HttpConfig;
+    ///
+    /// let cfg = HttpConfig::default();
+    /// assert_eq!(cfg.timeout_ms, 9000);
+    /// assert_eq!(cfg.retries, 3);
+    /// assert_eq!(cfg.rate_per_sec_cloud, 2);
+    /// assert_eq!(cfg.rate_per_sec_explorer, 4);
+    ///
+    /// let built_cfg = HttpConfig::builder()
+    ///     .timeout_ms(5000)
+    ///     .retries(5)
+    ///     .rate_per_sec_cloud(3)
+    ///     .rate_per_sec_explorer(6)
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(built_cfg.timeout_ms, 5000);
+    /// assert_eq!(built_cfg.retries, 5);
+    /// assert_eq!(built_cfg.rate_per_sec_cloud, 3);
+    /// assert_eq!(built_cfg.rate_per_sec_explorer, 6);
+    /// ```
+    pub fn builder() -> HttpConfigBuilder {
+        HttpConfigBuilder::default()
+    }
+}
+
+impl Default for HttpConfig {
+    /// Load the default HttpConfig from the default configuration file.
+    /// # Returns
+    /// * `HttpConfig` - The default HttpConfig.
+    /// # Panics
+    /// Panics if the default configuration file cannot be loaded.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::HttpConfig;
+    /// let cfg = HttpConfig::default();
+    /// assert_eq!(cfg.timeout_ms, 9000);
+    /// assert_eq!(cfg.retries, 3);
+    /// assert_eq!(cfg.rate_per_sec_cloud, 2);
+    /// assert_eq!(cfg.rate_per_sec_explorer, 4);
+    /// ```
+    fn default() -> Self {
+        let filename = "src/config/default_config.toml";
+        load_config_type_from_file(filename, "http")
+            .and_then(|cfg| match cfg {
+                ConfigTypes::Http(c) => Ok(c),
+                _ => Err(anyhow!("Expected HttpConfig")),
+            })
+            .expect("Failed to load default HttpConfig")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_http_config_default() {
+        let cfg = HttpConfig::default();
+        assert_eq!(cfg.timeout_ms, 9000);
+        assert_eq!(cfg.retries, 3);
+        assert_eq!(cfg.rate_per_sec_cloud, 2);
+        assert_eq!(cfg.rate_per_sec_explorer, 4);
+    }
+
+    #[test]
+    fn test_http_config_load() {
+        let filename = "src/config/default_config.toml";
+        let cfg = HttpConfig::load(filename).unwrap();
+        assert_eq!(cfg.timeout_ms, 9000);
+        assert_eq!(cfg.retries, 3);
+        assert_eq!(cfg.rate_per_sec_cloud, 2);
+        assert_eq!(cfg.rate_per_sec_explorer, 4);
+    }
+
+    #[test]
+    fn test_http_config_builder() {
+        let cfg = HttpConfig::builder()
+            .timeout_ms(5000)
+            .retries(5)
+            .rate_per_sec_cloud(3)
+            .rate_per_sec_explorer(6)
+            .build()
+            .unwrap();
+        assert_eq!(cfg.timeout_ms, 5000);
+        assert_eq!(cfg.retries, 5);
+        assert_eq!(cfg.rate_per_sec_cloud, 3);
+        assert_eq!(cfg.rate_per_sec_explorer, 6);
+    }
+
+    #[test]
+    fn test_http_config_builder_defaults() {
+        let cfg = HttpConfig::builder().build().unwrap();
+        let default_cfg = HttpConfig::default();
+
+        assert_eq!(cfg.timeout_ms, default_cfg.timeout_ms);
+        assert_eq!(cfg.retries, default_cfg.retries);
+        assert_eq!(cfg.rate_per_sec_cloud, default_cfg.rate_per_sec_cloud);
+        assert_eq!(cfg.rate_per_sec_explorer, default_cfg.rate_per_sec_explorer);
+    }
+
+    #[test]
+    fn test_debug_clone_deserialize() {
+        let toml_str = r#"timeout_ms = 9000
+retries = 3
+rate_per_sec_cloud = 2
+rate_per_sec_explorer = 4"#;
+        let cfg1: HttpConfig = toml::from_str(toml_str).unwrap();
+        let cfg2 = cfg1.clone();
+        assert_eq!(cfg1.timeout_ms, cfg2.timeout_ms);
+        assert_eq!(cfg1.retries, cfg2.retries);
+        assert_eq!(cfg1.rate_per_sec_cloud, cfg2.rate_per_sec_cloud);
+        assert_eq!(cfg1.rate_per_sec_explorer, cfg2.rate_per_sec_explorer);
+    }
+
+    #[test]
+    fn test_http_config_panic_on_invalid_file() {
+        let filename = "non_existent_file.toml";
+        let result = HttpConfig::load(filename);
+        assert!(result.is_err());
+    }
+}
+</file>
+
+<file path="src/config/mod.rs">
+pub mod app_config;
+pub mod cache_config;
+pub mod http_config;
+pub mod policy_config;
+pub mod popularity_config;
+pub mod quality_config;
+pub mod rate_config;
+pub mod search_config;
+pub mod toml_utils;
+
+pub use app_config::AppConfig;
+pub use cache_config::CacheConfig;
+pub use http_config::HttpConfig;
+pub use policy_config::PolicyConfig;
+pub use popularity_config::PopularityConfig;
+pub use quality_config::QualityConfig;
+pub use rate_config::RateConfig;
+pub use search_config::SearchConfig;
+pub use toml_utils::{load_config_type_from_file, load_default_config, load_toml_from_file};
+</file>
+
+<file path="src/config/quality_config.rs">
+use derive_builder::Builder;
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Deserialize, Builder)]
+pub struct QualityConfig {
+    #[builder(default = "\"cloud\".to_string()")]
+    pub source: String,
+    #[builder(default = "5")]
+    pub multi_pv: usize,
+    #[builder(default = "\"https://lichess.org/api/cloud-eval\".to_string()")]
+    pub base_url: String,
+}
+
+impl QualityConfig {
+    /// Load QualityConfig from a TOML file.
+    /// # Arguments
+    /// * `filename` - Path to the TOML configuration file.
+    /// # Returns
+    /// * `Result<QualityConfig>` - Loaded QualityConfig or an error.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::QualityConfig;
+    /// let cfg_path = "src/config/default_config.toml";
+    /// let cfg = QualityConfig::load(cfg_path).unwrap();
+    /// assert_eq!(cfg.source, "cloud".to_string());
+    /// assert_eq!(cfg.multi_pv, 4);
+    /// assert_eq!(cfg.base_url, "https://lichess.org/api/cloud-eval".to_string());
+    /// ```
+    pub fn load(filename: &str) -> anyhow::Result<Self> {
+        crate::config::toml_utils::load_config_type_from_file(filename, "quality").and_then(|cfg| {
+            match cfg {
+                crate::config::toml_utils::ConfigTypes::Quality(c) => Ok(c),
+                _ => Err(anyhow::anyhow!("Expected QualityConfig")),
+            }
+        })
+    }
+
+    /// Create a builder for QualityConfig.
+    /// # Returns
+    /// * `QualityConfigBuilder` - A builder for QualityConfig.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::QualityConfig;
+    ///
+    /// let cfg = QualityConfig::builder()
+    ///     .source("andy".to_string())
+    ///     .multi_pv(25)
+    ///     .base_url("https://lichess.org/api/cloud-eval-andy".to_string())
+    ///     .build()
+    ///     .unwrap();
+    /// assert_eq!(cfg.source, "andy".to_string());
+    /// assert_eq!(cfg.multi_pv, 25);
+    /// assert_eq!(cfg.base_url, "https://lichess.org/api/cloud-eval-andy".to_string());
+    /// ```
+    pub fn builder() -> QualityConfigBuilder {
+        QualityConfigBuilder::default()
+    }
+}
+
+impl Default for QualityConfig {
+    /// Load the default QualityConfig from the default configuration file.
+    /// # Returns
+    /// * `QualityConfig` - The default QualityConfig.
+    /// # Examples
+    /// ```
+    /// use repgrow::config::QualityConfig;
+    /// let cfg = QualityConfig::default();
+    /// assert_eq!(cfg.source, "cloud".to_string());
+    /// assert_eq!(cfg.multi_pv, 4);
+    /// assert_eq!(cfg.base_url, "https://lichess.org/api/cloud-eval".to_string());
+    /// ```
+    fn default() -> Self {
+        let cfg_path = "src/config/default_config.toml";
+        QualityConfig::load(cfg_path).unwrap() // panic if cannot load default config --- IGN
+    }
 }
 </file>
 
 <file path="src/domain/color.rs">
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PieceColor {
@@ -717,6 +3219,24 @@ pub enum PieceColor {
 }
 
 impl PieceColor {
+    /// Returns true if the color is white.
+    pub fn is_white(&self) -> bool {
+        matches!(self, PieceColor::White)
+    }
+
+    /// Returns true if the color is black.
+    pub fn is_black(&self) -> bool {
+        matches!(self, PieceColor::Black)
+    }
+    /// Returns "white" or "black".
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PieceColor;
+    /// let white = PieceColor::White;
+    /// let black = PieceColor::Black;
+    /// assert_eq!(white.to_string(), "white");
+    /// assert_eq!(black.to_string(), "black");
+    /// ```
     pub fn to_string(&self) -> &str {
         match self {
             PieceColor::White => "white",
@@ -724,6 +3244,17 @@ impl PieceColor {
         }
     }
 
+    /// Creates a PieceColor from a character ('w' or 'b', case insensitive).
+    /// Returns None for invalid characters.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PieceColor;
+    /// assert_eq!(PieceColor::from_char('w'), Some(PieceColor::White));
+    /// assert_eq!(PieceColor::from_char('b'), Some(PieceColor::Black));
+    /// assert_eq!(PieceColor::from_char('W'), Some(PieceColor::White));
+    /// assert_eq!(PieceColor::from_char('B'), Some(PieceColor::Black));
+    /// assert_eq!(PieceColor::from_char('x'), None);
+    /// ```
     pub fn from_char(c: char) -> Option<Self> {
         match c {
             'w' | 'W' => Some(PieceColor::White),
@@ -732,6 +3263,16 @@ impl PieceColor {
         }
     }
 
+    /// Converts to shakmaty::Color. Sometimes my PieceColor is easier, sometimes shakmaty's is.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PieceColor;
+    /// use shakmaty::Color;
+    /// let white = PieceColor::White;
+    /// let black = PieceColor::Black;
+    /// assert_eq!(white.to_shakmaty(), Color::White);
+    /// assert_eq!(black.to_shakmaty(), Color::Black);
+    /// ```
     pub fn to_shakmaty(&self) -> shakmaty::Color {
         match self {
             PieceColor::White => shakmaty::Color::White,
@@ -739,6 +3280,14 @@ impl PieceColor {
         }
     }
 
+    /// Converts from shakmaty::Color to PieceColor.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PieceColor;
+    /// use shakmaty::Color;
+    /// assert_eq!(PieceColor::from_shakmaty(Color::White), PieceColor::White);
+    /// assert_eq!(PieceColor::from_shakmaty(Color::Black), PieceColor::Black);
+    /// ```
     pub fn from_shakmaty(c: shakmaty::Color) -> Self {
         match c {
             shakmaty::Color::White => PieceColor::White,
@@ -746,41 +3295,483 @@ impl PieceColor {
         }
     }
 }
+
+impl Display for PieceColor {
+    /// Formats the PieceColor as "white" or "black".
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PieceColor;
+    /// let white = PieceColor::White;
+    /// let black = PieceColor::Black;
+    /// assert_eq!(format!("{}", white), "white");
+    /// assert_eq!(format!("{}", black), "black");
+    /// ```
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
 </file>
 
 <file path="src/domain/fen_key.rs">
-use serde::{Deserialize, Serialize};
-
 use crate::domain::PieceColor;
+use serde::{Deserialize, Serialize};
+use std::fmt::{Formatter, Result};
 
 /// FEN + side-to-move forms a canonical lookup key.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FenKey {
-    pub fen: String,
-    pub stm: PieceColor,
+    pub fen_string: String,
+    pub side_to_move: PieceColor,
+}
+
+impl FenKey {
+    /// Creates a new FenKey from a FEN string and side to move.
+    /// # Arguments
+    /// * `fen_string` - The FEN string representing the board position.
+    /// * `side_to_move` - The side to move (PieceColor).
+    /// # Returns
+    /// * `FenKey` - A new FenKey instance.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::{FenKey, PieceColor};
+    /// let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
+    /// let key = FenKey::new(fen.clone(), PieceColor::White);
+    /// assert_eq!(key.fen_string, fen);
+    /// assert_eq!(key.side_to_move, PieceColor::White);
+    /// ```
+    pub fn new(fen_string: String, side_to_move: PieceColor) -> Self {
+        Self {
+            fen_string,
+            side_to_move,
+        }
+    }
+
+    /// Returns a FenKey representing the standard starting position.
+    /// # Returns
+    /// * `FenKey` - A FenKey for the starting position.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::{FenKey, PieceColor};
+    /// let starting_key = FenKey::starting_position();
+    /// assert_eq!(starting_key.fen_string, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string());
+    /// assert_eq!(starting_key.side_to_move, PieceColor::White);
+    /// ```
+    pub fn starting_position() -> Self {
+        Self {
+            fen_string: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string(),
+            side_to_move: PieceColor::White,
+        }
+    }
+}
+
+impl std::fmt::Display for FenKey {
+    /// Formats the FenKey as "FEN side_to_move".
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::{FenKey, PieceColor};
+    /// let fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_string();
+    /// let key = FenKey::new(fen.clone(), PieceColor::White);
+    /// assert_eq!(format!("{}", key), format!("{} {}", fen, "white"));
+    /// ```
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{} {}", self.fen_string, self.side_to_move)
+    }
 }
 </file>
 
-<file path="src/domain/mod.rs">
-pub mod candidate_move;
-pub mod candidate_request;
-pub mod color;
-pub mod eval_line;
-pub mod fen_key;
-pub mod play_rate;
-pub mod popularity_row;
-pub mod repertoire_node;
-pub mod signals;
+<file path="src/domain/play_rate.rs">
+use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 
-pub use candidate_move::CandidateMove;
-pub use candidate_request::CandidateRequest;
-pub use color::PieceColor;
-pub use eval_line::EvalLine;
-pub use fen_key::FenKey;
-pub use play_rate::PlayRate;
-pub use popularity_row::PopularityRow;
-pub use repertoire_node::RepertoireNode;
-pub use signals::Signals;
+/// Wrapper type for play rate as a float between 0.0 and 1.0.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlayRate(pub f32);
+
+impl PlayRate {
+    /// Creates a new PlayRate, ensuring the value is clamped between 0.0 and 1.0.
+    /// # Arguments
+    /// * `rate` - The play rate as a float.
+    /// # Returns
+    /// * `PlayRate` - A new PlayRate instance.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PlayRate;
+    /// let pr = PlayRate::new(0.75);
+    /// assert_eq!(pr.as_f32(), 0.75);
+    /// let pr_low = PlayRate::new(-0.5);
+    /// assert_eq!(pr_low.as_f32(), 0.0);
+    /// let pr_high = PlayRate::new(1.5);
+    /// assert_eq!(pr_high.as_f32(), 1.0);
+    /// let pr_valid = PlayRate::new(0.5);
+    /// assert_eq!(pr_valid.as_f32(), 0.5);
+    /// assert_eq!(pr_valid.as_float(), 0.5);
+    /// assert_eq!(pr_valid.value(), 0.5);
+    /// ```
+    pub fn new(rate: f32) -> Self {
+        PlayRate(rate.clamp(0.0, 1.0))
+    }
+
+    /// Returns the inner float value.
+    /// # Returns
+    /// * `f32` - The play rate as a float.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::PlayRate;
+    /// let pr = PlayRate::new(0.33);
+    /// assert_eq!(pr.as_f32(), 0.33);
+    /// ```
+    pub fn as_f32(&self) -> f32 {
+        self.0
+    }
+
+    /// Alias for as_f32.
+    pub fn as_float(&self) -> f32 {
+        self.as_f32()
+    }
+
+    /// Alias for as_f32.
+    pub fn value(&self) -> f32 {
+        self.as_f32()
+    }
+
+    /// Returns the play rate as a percentage (0 to 100), rounded to `round_to` decimal places and formatted as a String.
+    pub fn as_pct(&self) -> String {
+        let factor = 10f32.powi(2);
+        let rounded = (self.0 * 100.0 * factor).round() / factor;
+        format!("{:}", rounded)
+    }
+
+    /// Returns GreaterThan, LessThan, or Equal to another PlayRate.
+    pub fn compare(&self, other: &PlayRate) -> Ordering {
+        let value1 = self.0;
+        let value2 = other.0;
+        if value1 < value2 {
+            Ordering::Less
+        } else if value1 > value2 {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        }
+    }
+}
+
+impl Default for PlayRate {
+    fn default() -> Self {
+        PlayRate(0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_play_rate_creation() {
+        let pr = PlayRate::new(0.75);
+        assert_eq!(pr.as_f32(), 0.75);
+        assert_eq!(pr.as_float(), 0.75);
+        assert_eq!(pr.value(), 0.75);
+    }
+
+    #[test]
+    fn test_play_rate_clamping() {
+        let pr_low = PlayRate::new(-0.5);
+        assert_eq!(pr_low.as_f32(), 0.0);
+        let pr_high = PlayRate::new(1.5);
+        assert_eq!(pr_high.as_f32(), 1.0);
+        let pr_valid = PlayRate::new(0.5);
+        assert_eq!(pr_valid.as_f32(), 0.5);
+        assert_eq!(pr_valid.as_float(), 0.5);
+        assert_eq!(pr_valid.value(), 0.5);
+    }
+
+    #[test]
+    fn test_play_rate_as_pct() {
+        let pr = PlayRate::new(0.756);
+        assert_eq!(pr.as_pct(), "75.6");
+        let pr2 = PlayRate::new(0.1);
+        assert_eq!(pr2.as_pct(), "10");
+        let pr3 = PlayRate::new(0.999);
+        assert_eq!(pr3.as_pct(), "99.9");
+    }
+
+    #[test]
+    fn test_play_rate_compare() {
+        let pr1 = PlayRate::new(0.5);
+        let pr2 = PlayRate::new(0.75);
+        let pr3 = PlayRate::new(0.5);
+        assert_eq!(pr1.compare(&pr2), Ordering::Less);
+        assert_eq!(pr2.compare(&pr1), Ordering::Greater);
+        assert_eq!(pr1.compare(&pr3), Ordering::Equal);
+    }
+}
+</file>
+
+<file path="src/search/build/make_node.rs">
+use crate::domain::{FenKey, RepertoireNode, chess::UciMove};
+
+/// Make a node (id set by arena)
+pub fn make_node(
+    parent: Option<u64>,
+    fen_key: &FenKey,
+    last_uci: Option<UciMove>,
+    ply: u32,
+) -> RepertoireNode {
+    RepertoireNode {
+        id: 0,
+        parent,
+        fen_key: fen_key.clone(),
+        last_move_uci: last_uci,
+        ply_depth: ply,
+        children: Vec::new(),
+        signals: Default::default(),
+    }
+}
+</file>
+
+<file path="src/search/dispatcher.rs">
+use super::{
+    arena::{MemArena, NodeArenaStore},
+    build::{make_node, start_from_san},
+    worker::expand_node_task,
+};
+use crate::{
+    config::SearchConfig,
+    domain::{FenKey, RepertoireNode},
+    policy::MovePolicy,
+    provider::{MovePopularity, MoveQuality},
+};
+use dashmap::DashSet;
+use std::sync::Arc;
+use tokio::{sync::mpsc, task::JoinSet};
+use tracing::{debug, info};
+
+/// Orchestrator: drains the work queue (single consumer) and spawns a worker per item.
+pub struct Orchestrator {
+    cfg: SearchConfig,
+    policy: Arc<dyn MovePolicy>,
+    quality: Arc<dyn MoveQuality>,
+    popularity: Arc<dyn MovePopularity>,
+    arena: MemArena,
+    seen: DashSet<FenKey>,
+}
+
+impl Orchestrator {
+    pub fn new(
+        cfg: SearchConfig,
+        policy: impl MovePolicy + 'static,
+        quality: Arc<dyn MoveQuality>,
+        popularity: Arc<dyn MovePopularity>,
+    ) -> Self {
+        Self {
+            cfg,
+            policy: Arc::new(policy),
+            quality,
+            popularity,
+            arena: MemArena::new(),
+            seen: DashSet::new(),
+        }
+    }
+
+    /// Build repertoire from an optional SAN line and expand up to `max_plies`.
+    /// Single-consumer dispatcher pattern: no Receiver clones.
+    pub async fn build_from_start(
+        &self,
+        san_line: Option<&str>,
+        max_plies: u32,
+    ) -> anyhow::Result<RepertoireNode> {
+        info!(
+            "Orchestrator: build_from_start called with san_line={:?}, max_plies={}",
+            san_line, max_plies
+        );
+        let (root_fen, _stm) = start_from_san(san_line)?;
+        debug!("Root FEN: {:?}", root_fen);
+        let root_id = self.arena.push(make_node(None, &root_fen, None, 0)).await;
+        debug!("Root node pushed with id: {}", root_id);
+        let root = self.arena.get(root_id).await.expect("root in arena");
+
+        let (tx, mut rx) = mpsc::channel::<u64>(self.cfg.concurrency * 4);
+        tx.send(root.id).await.ok();
+
+        let mut joinset = JoinSet::new();
+
+        while let Some(nid) = rx.recv().await {
+            debug!("Dequeued node id: {} for expansion", nid);
+            let tx2 = tx.clone();
+            let cfg2 = self.cfg.clone();
+            let policy2 = Arc::clone(&self.policy);
+            let quality2 = Arc::clone(&self.quality);
+            let popularity2 = Arc::clone(&self.popularity);
+            let seen2 = self.seen.clone();
+            let arena_ref = self.arena.clone();
+
+            joinset.spawn(async move {
+                debug!("Worker spawned for node id: {}", nid);
+                let _ = expand_node_task(
+                    nid,
+                    max_plies,
+                    &cfg2,
+                    &*policy2,
+                    &quality2,
+                    &popularity2,
+                    &arena_ref,
+                    &seen2,
+                    &tx2,
+                )
+                .await;
+                debug!("Worker finished for node id: {}", nid);
+            });
+        }
+
+        // Sender dropped → wait for all in-flight workers to finish
+        info!("Waiting for all workers to finish...");
+        while let Some(_res) = joinset.join_next().await {}
+        info!("All workers finished. Returning root node.");
+
+        Ok(root)
+    }
+    /// Returns a clone of all nodes in the arena (for testing/inspection).
+    pub async fn all_nodes(&self) -> Vec<crate::domain::RepertoireNode> {
+        self.arena.all_nodes().await
+    }
+}
+</file>
+
+<file path="src/search/mod.rs">
+pub mod arena;
+pub mod build;
+pub mod dispatcher;
+pub mod util;
+pub mod worker;
+
+pub use dispatcher::Orchestrator;
+</file>
+
+<file path="tests/dummy_integration.rs">
+// use anyhow::Result;
+// use repgrow::{
+//     config::SearchConfig,
+//     domain::{EvalLine, FenKey, PopularityRow},
+//     policy::SideSplitPolicy,
+//     provider::{MovePopularity, MoveQuality, PopularityCaps, QualityCaps},
+//     search::Orchestrator,
+// };
+// use std::sync::Arc;
+
+// struct DummyQ;
+// #[async_trait::async_trait]
+// impl MoveQuality for DummyQ {
+//     async fn evaluate(&self, _fen: &FenKey, _multipv: Option<usize>) -> Result<Vec<EvalLine>> {
+//         Ok(vec![
+//             EvalLine {
+//                 uci: "e2e4".into(),
+//                 eval_cp: 30,
+//                 depth: 20,
+//             },
+//             EvalLine {
+//                 uci: "d2d4".into(),
+//                 eval_cp: 10,
+//                 depth: 20,
+//             },
+//         ])
+//     }
+//     fn caps(&self) -> QualityCaps {
+//         QualityCaps { max_multipv: 8 }
+//     }
+// }
+
+// struct DummyP;
+// #[async_trait::async_trait]
+// impl MovePopularity for DummyP {
+//     async fn sample(&self, _fen: &FenKey) -> Result<Vec<PopularityRow>> {
+//         Ok(vec![
+//             PopularityRow {
+//                 uci: "e7e5".into(),
+//                 play_rate: 0.6,
+//                 games: 1000,
+//             },
+//             PopularityRow {
+//                 uci: "c7c5".into(),
+//                 play_rate: 0.3,
+//                 games: 800,
+//             },
+//         ])
+//     }
+//     fn caps(&self) -> PopularityCaps {
+//         PopularityCaps {
+//             supports_filters: true,
+//         }
+//     }
+// }
+
+// #[tokio::test]
+// async fn dispatcher_builds_two_plies() {
+//     // Constrain branching to keep the tree small & deterministic
+//     let cfg = SearchConfig {
+//         concurrency: 4,
+//         max_total_nodes: Some(10),
+//         max_children_my_side: Some(1),
+//         max_children_opp_side: Some(1),
+//     };
+//     let policy = SideSplitPolicy::new(shakmaty::Color::White, 50, 0.05);
+
+//     let orch = Orchestrator::new(cfg, policy, Arc::new(DummyQ), Arc::new(DummyP));
+
+//     // Start from initial position; expand two plies (W then B)
+//     let root = orch.build_from_start(None, 2).await.unwrap();
+
+//     // We can't easily read back the full arena here without a getter,
+//     // but this ensures the pipeline runs to completion and returns a root.
+//     assert_eq!(root.ply_depth, 0);
+// }
+</file>
+
+<file path="src/domain/candidate_move.rs">
+use crate::domain::chess::UciMove;
+
+use super::fen_key::FenKey;
+use super::signals::Signals;
+
+#[derive(Clone, Debug)]
+pub struct CandidateMove {
+    pub uci: UciMove,
+    pub next_fen: FenKey,
+    pub signals: Signals,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::{Centipawns, PieceColor, PlayRate};
+
+    use super::*;
+
+    #[test]
+    fn test_candidate_move_creation() {
+        let move_ = CandidateMove {
+            uci: UciMove::from_uci("e2e4").unwrap(),
+            next_fen: FenKey {
+                fen_string: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+                    .to_string(),
+                side_to_move: PieceColor::Black,
+            },
+            signals: Signals {
+                eval_cp: Some(Centipawns::from_float(0.85)),
+                depth: None,
+                play_rate: Some(PlayRate::new(0.75)),
+                games: None,
+            },
+        };
+
+        assert_eq!(move_.uci, UciMove::from_uci("e2e4").unwrap());
+        assert_eq!(
+            move_.next_fen.fen_string,
+            "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
+        );
+        assert_eq!(move_.next_fen.side_to_move, PieceColor::Black);
+        assert_eq!(move_.signals.play_rate, Some(PlayRate::new(0.75)));
+        assert_eq!(move_.signals.eval_cp, Some(Centipawns::from_float(0.85)));
+    }
+}
 </file>
 
 <file path="src/domain/repertoire_node.rs">
@@ -788,15 +3779,14 @@ pub use signals::Signals;
 /// Each node corresponds to a position reached by a sequence of moves.
 /// The tree is stored in an arena, with nodes referencing children by their IDs.
 use super::fen_key::FenKey;
-use crate::domain::{PieceColor, Signals};
-// use shakmaty::Color;
+use crate::domain::{PieceColor, Signals, chess::UciMove};
 
 #[derive(Clone, Debug)]
 pub struct RepertoireNode {
     pub id: u64,
     pub parent: Option<u64>,
     pub fen_key: FenKey,
-    pub last_move_uci: Option<String>,
+    pub last_move_uci: Option<UciMove>,
     pub ply_depth: u32,
     pub children: Vec<u64>,
     pub signals: Signals,
@@ -807,7 +3797,7 @@ impl RepertoireNode {
         id: u64,
         parent: Option<u64>,
         fen_key: FenKey,
-        last_move_uci: Option<String>,
+        last_move_uci: Option<UciMove>,
         ply_depth: u32,
     ) -> Self {
         Self {
@@ -832,8 +3822,8 @@ impl Default for RepertoireNode {
             id: 0,
             parent: None,
             fen_key: FenKey {
-                fen: String::from("startpos"),
-                stm: PieceColor::White,
+                fen_string: String::from("startpos"),
+                side_to_move: PieceColor::White,
             },
             last_move_uci: None,
             ply_depth: 0,
@@ -846,20 +3836,29 @@ impl Default for RepertoireNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{fen_key::FenKey, PieceColor, Signals};
+    use crate::domain::{Centipawns, PieceColor, Signals, fen_key::FenKey};
 
     #[test]
     fn test_new_node() {
         let fen_key = FenKey {
-            fen: "8/8/8/8/8/8/8/8 w - - 0 1".to_string(),
-            stm: PieceColor::Black,
+            fen_string: "8/8/8/8/8/8/8/8 w - - 0 1".to_string(),
+            side_to_move: PieceColor::Black,
         };
-        let node = RepertoireNode::new(42, Some(1), fen_key.clone(), Some("e2e4".to_string()), 5);
+        let node = RepertoireNode::new(
+            42,
+            Some(1),
+            fen_key.clone(),
+            Some(UciMove::from_uci("e2e4").unwrap()),
+            5,
+        );
         assert_eq!(node.id, 42);
         assert_eq!(node.parent, Some(1));
-        assert_eq!(node.fen_key.fen, fen_key.fen);
-        assert_eq!(node.fen_key.stm, PieceColor::Black);
-        assert_eq!(node.last_move_uci, Some("e2e4".to_string()));
+        assert_eq!(node.fen_key.fen_string, fen_key.fen_string);
+        assert_eq!(node.fen_key.side_to_move, PieceColor::Black);
+        assert_eq!(
+            Some(node.last_move_uci.unwrap().to_uci()),
+            Some("e2e4".to_string())
+        );
         assert_eq!(node.ply_depth, 5);
         assert!(node.children.is_empty());
         assert_eq!(node.signals, Signals::default());
@@ -870,8 +3869,8 @@ mod tests {
         let node = RepertoireNode::default();
         assert_eq!(node.id, 0);
         assert_eq!(node.parent, None);
-        assert_eq!(node.fen_key.fen, "startpos");
-        assert_eq!(node.fen_key.stm, PieceColor::White);
+        assert_eq!(node.fen_key.fen_string, "startpos");
+        assert_eq!(node.fen_key.side_to_move, PieceColor::White);
         assert_eq!(node.last_move_uci, None);
         assert_eq!(node.ply_depth, 0);
         assert!(node.children.is_empty());
@@ -903,8 +3902,8 @@ mod tests {
     #[test]
     fn test_signals_field() {
         let mut node = RepertoireNode::default();
-        node.signals.eval_cp = Some(1.5);
-        assert_eq!(node.signals.eval_cp, Some(1.5));
+        node.signals.eval_cp = Some(Centipawns::from_float(1.5));
+        assert_eq!(node.signals.eval_cp, Some(Centipawns::from_float(1.5)));
     }
 
     #[test]
@@ -913,32 +3912,33 @@ mod tests {
             99,
             Some(88),
             FenKey {
-                fen: "testfen".to_string(),
-                stm: PieceColor::Black,
+                fen_string: "testfen".to_string(),
+                side_to_move: PieceColor::Black,
             },
-            Some("g1f3".to_string()),
+            Some(UciMove::from_uci("g1f3").unwrap()),
             12,
         );
         let node2 = node.clone();
         assert_eq!(node.id, node2.id);
         let dbg = format!("{:?}", node2);
+        dbg!(dbg.clone());
         assert!(dbg.contains("RepertoireNode"));
         assert!(dbg.contains("id: 99"));
         assert!(dbg.contains("parent: Some(88)"));
         assert!(dbg.contains("fen_key"));
-        assert!(dbg.contains("last_move_uci: Some(\"g1f3\")"));
+        assert!(dbg.contains("last_move_uci: Some(UciMove { from: ChessSquare(G, One), to: ChessSquare(F, Three), promotion: None })"));
     }
 }
 </file>
 
 <file path="src/domain/signals.rs">
-use crate::domain::PlayRate;
+use crate::domain::{Centipawns, PlayRate};
 
 /// Signals union carried by candidates; expandable without changing traits.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Signals {
     /// Centipawn evaluation from engine analysis, positive for White, negative for Black. None if no evaluation available.
-    pub eval_cp: Option<f32>,
+    pub eval_cp: Option<Centipawns>,
 
     /// Depth of the engine analysis that produced eval_cp. None if no analysis available.
     pub depth: Option<u8>,
@@ -966,12 +3966,12 @@ mod tests {
     #[test]
     fn test_signals_new_values() {
         let s = Signals {
-            eval_cp: Some(42.5),
+            eval_cp: Some(Centipawns::from_float(42.5)),
             depth: Some(12),
             play_rate: Some(PlayRate::new(0.8)),
             games: Some(100),
         };
-        assert_eq!(s.eval_cp, Some(42.5));
+        assert_eq!(s.eval_cp, Some(Centipawns::from_float(42.5)));
         assert_eq!(s.depth, Some(12));
         assert_eq!(s.play_rate, Some(PlayRate::new(0.8)));
         assert_eq!(s.games, Some(100));
@@ -980,7 +3980,7 @@ mod tests {
     #[test]
     fn test_signals_clone() {
         let s1 = Signals {
-            eval_cp: Some(-3.2),
+            eval_cp: Some(Centipawns::from_float(-3.2)),
             depth: Some(5),
             play_rate: None,
             games: Some(7),
@@ -995,140 +3995,18 @@ mod tests {
     #[test]
     fn test_signals_debug() {
         let s = Signals {
-            eval_cp: Some(1.0),
+            eval_cp: Some(Centipawns::from_float(1.0)),
             depth: Some(2),
             play_rate: Some(PlayRate::new(0.5)),
             games: Some(10),
         };
         let dbg = format!("{:?}", s);
+        println!("Results from the debug macro:\n{}", dbg);
         assert!(dbg.contains("Signals"));
-        assert!(dbg.contains("eval_cp: Some(1.0)"));
+        assert!(dbg.contains("eval_cp: Some(Centipawns(1.0))"));
         assert!(dbg.contains("depth: Some(2)"));
-        assert!(dbg.contains("play_rate: Some(0.5)"));
+        assert!(dbg.contains("play_rate: Some(PlayRate(0.5))"));
         assert!(dbg.contains("games: Some(10)"));
-    }
-}
-</file>
-
-<file path="src/infra/cache/kv_cache.rs">
-use async_trait::async_trait;
-use std::{hash::Hash, sync::Arc};
-
-/// Minimal cache trait to decouple from moka.
-#[async_trait]
-pub trait KvCache<K, V>: Send + Sync
-where
-    K: Eq + Hash + Send + Sync + 'static,
-    V: Send + Sync + 'static,
-{
-    async fn get(&self, k: &K) -> Option<Arc<V>>;
-    async fn put(&self, k: K, v: Arc<V>);
-}
-</file>
-
-<file path="src/infra/cache/mem_cache.rs">
-use async_trait::async_trait;
-use moka::future::Cache;
-use std::{hash::Hash, sync::Arc, time::Duration};
-
-use crate::infra::cache::kv_cache::KvCache;
-
-/// Moka-backed in-memory cache.
-pub struct MemCache<K, V> {
-    inner: Cache<K, Arc<V>>,
-}
-
-impl<K, V> MemCache<K, V>
-where
-    K: Eq + Hash + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
-{
-    pub fn new(capacity: u64, ttl_secs: u64) -> Self {
-        let inner = Cache::builder()
-            .max_capacity(capacity)
-            .time_to_live(Duration::from_secs(ttl_secs))
-            .build();
-        Self { inner }
-    }
-}
-
-#[async_trait]
-impl<K, V> KvCache<K, V> for MemCache<K, V>
-where
-    K: Eq + Hash + Clone + Send + Sync + 'static,
-    V: Send + Sync + 'static,
-{
-    async fn get(&self, k: &K) -> Option<Arc<V>> {
-        self.inner.get(k).await
-    }
-    async fn put(&self, k: K, v: Arc<V>) {
-        self.inner.insert(k, v).await;
-    }
-}
-</file>
-
-<file path="src/infra/http/mod.rs">
-use reqwest::Client;
-
-pub fn build_http(timeout_ms: u64) -> Client {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms))
-        .build()
-        .expect("reqwest client")
-}
-</file>
-
-<file path="src/infra/rate/mod.rs">
-use governor::{
-    clock::DefaultClock, state::InMemoryState, state::NotKeyed, Quota, RateLimiter as GovLimiter,
-};
-use std::{num::NonZeroU32, sync::Arc};
-
-/// Minimal rate-limiter interface.
-#[derive(Clone)]
-pub struct RateLimiter {
-    inner: Arc<GovLimiter<NotKeyed, InMemoryState, DefaultClock>>,
-}
-
-impl RateLimiter {
-    pub fn per_sec(n: u32) -> Self {
-        let q = Quota::per_second(NonZeroU32::new(n.max(1)).unwrap());
-        Self {
-            inner: Arc::new(GovLimiter::<NotKeyed, InMemoryState, DefaultClock>::direct(
-                q,
-            )),
-        }
-    }
-    pub async fn acquire(&self) {
-        use governor::Jitter;
-        let _ = self
-            .inner
-            .until_ready_with_jitter(Jitter::up_to(std::time::Duration::from_millis(30)))
-            .await;
-    }
-}
-</file>
-
-<file path="src/infra/scheduler/mod.rs">
-use async_trait::async_trait;
-use tokio::sync::mpsc;
-
-#[async_trait]
-pub trait TaskScheduler: Send + Sync {
-    async fn spawn<F>(&self, fut: F) where F: std::future::Future<Output = ()> + Send + 'static;
-    fn channel<T: Send + 'static>(&self, cap: usize) -> (mpsc::Sender<T>, mpsc::Receiver<T>);
-}
-
-#[derive(Clone, Default)]
-pub struct TokioScheduler;
-
-#[async_trait]
-impl TaskScheduler for TokioScheduler {
-    async fn spawn<F>(&self, fut: F) where F: std::future::Future<Output = ()> + Send + 'static {
-        tokio::spawn(fut);
-    }
-    fn channel<T: Send + 'static>(&self, cap: usize) -> (mpsc::Sender<T>, mpsc::Receiver<T>) {
-        mpsc::channel(cap)
     }
 }
 </file>
@@ -1141,6 +4019,7 @@ use std::sync::Arc;
 use tokio::sync::{oneshot, Mutex};
 
 /// Simple single-flight coalescer to dedupe inflight requests per key.
+#[derive(Debug)]
 pub struct SingleFlight<K, V> {
     inflight: Mutex<HashMap<K, Vec<oneshot::Sender<Arc<V>>>>>,
 }
@@ -1197,25 +4076,14 @@ where
         res
     }
 }
-</file>
 
-<file path="src/pgn/mod.rs">
-pub mod pgn_writer;
-pub mod repertoire_writer;
-pub mod uci_str;
-
-pub use pgn_writer::PgnWriter;
-pub use repertoire_writer::RepertoireWriter;
-pub use uci_str::UciStr;
-</file>
-
-<file path="src/policy/decision.rs">
-/// Which role to use at a node.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum Decision {
-    Quality,
-    Popularity,
-    Hybrid,
+impl<K, V> Default for SingleFlight<K, V>
+where
+    K: Eq + Hash + Clone,
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 </file>
 
@@ -1228,7 +4096,7 @@ pub use split_side_policy::SideSplitPolicy;
 
 use std::cmp::Ordering;
 
-use crate::domain::{CandidateRequest, PlayRate};
+use crate::domain::{CandidateRequest, Centipawns, PlayRate};
 use crate::provider::types::CandidateMoves;
 use shakmaty::Color;
 
@@ -1247,15 +4115,17 @@ pub trait MovePolicy: Send + Sync {
     fn post_filter(&self, mut cands: CandidateMoves) -> CandidateMoves {
         // Stable ordering: primary → secondary → UCI for determinism
         cands.sort_by(|a, b| {
-            let pa_eval = a.signals.eval_cp.unwrap_or(-10000.0);
-            let pb_eval = b.signals.eval_cp.unwrap_or(-10000.0);
+            let pa_eval = a.signals.eval_cp.unwrap_or(Centipawns::from_int(-10000));
+            let pb_eval = b.signals.eval_cp.unwrap_or(Centipawns::from_int(-10000));
 
             match pa_eval.partial_cmp(&pb_eval).unwrap_or(Ordering::Equal) {
                 Ordering::Equal => {
                     let pa_play = a.signals.play_rate.unwrap_or(PlayRate::new(-1.0));
                     let pb_play = b.signals.play_rate.unwrap_or(PlayRate::new(-1.0));
+                    let str_a = format!("{}{}", a.uci.from.to_coords(), a.uci.to.to_coords());
+                    let str_b = format!("{}{}", b.uci.from.to_coords(), b.uci.to.to_coords());
                     match pa_play.compare(&pb_play) {
-                        Ordering::Equal => a.uci.cmp(&b.uci),
+                        Ordering::Equal => str_a.cmp(&str_b),
                         other => other,
                     }
                 }
@@ -1263,49 +4133,6 @@ pub trait MovePolicy: Send + Sync {
             }
         });
         cands
-    }
-}
-</file>
-
-<file path="src/policy/split_side_policy.rs">
-use shakmaty::Color;
-
-use crate::{
-    domain::CandidateRequest,
-    policy::{Decision, MovePolicy},
-};
-
-/// Default: my side → quality (engine); opponent → popularity (explorer)
-pub struct SideSplitPolicy {
-    my_side: Color,
-    cp_window: i32,
-    min_play_rate: f32,
-}
-
-impl SideSplitPolicy {
-    pub fn new(my_side: Color, cp_window: i32, min_play_rate: f32) -> Self {
-        Self {
-            my_side,
-            cp_window,
-            min_play_rate,
-        }
-    }
-}
-
-impl MovePolicy for SideSplitPolicy {
-    fn decide(&self, stm: Color) -> Decision {
-        if stm == self.my_side {
-            Decision::Quality
-        } else {
-            Decision::Popularity
-        }
-    }
-    fn adjust(&self, req: &mut CandidateRequest, is_my_side: bool) {
-        if is_my_side {
-            req.cp_window = self.cp_window as f32;
-        } else {
-            req.min_play_rate = self.min_play_rate as f32;
-        }
     }
 }
 </file>
@@ -1320,9 +4147,17 @@ use crate::{
 use async_trait::async_trait;
 
 /// Lichess Opening Explorer popularity provider.
+#[derive(Debug, Clone)]
+
 pub struct Explorer {
-    cfg: PopularityConfig,
-    infra: Infra,
+    pub cfg: PopularityConfig,
+    pub infra: Infra,
+}
+
+impl Explorer {
+    pub fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Explorer")
+    }
 }
 
 impl Explorer {
@@ -1346,7 +4181,276 @@ impl MovePopularity for Explorer {
 }
 </file>
 
+<file path="src/main.rs">
+use clap_builder::Parser;
+use repgrow::pgn::RepertoireWriter;
+use repgrow::{
+    cli::Cli,
+    config::AppConfig,
+    infra::build_infra,
+    pgn::PgnWriter,
+    policy::SideSplitPolicy,
+    provider::{build_popularity, build_quality},
+    search::Orchestrator,
+};
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
+    let cli = Cli::parse();
+    let cfg = AppConfig::load(cli.config.expect("Cannot find config file").as_ref())?;
+
+    // Build infra
+    let infra = build_infra(&cfg)?;
+
+    // Build providers from config (factory)
+    let quality = build_quality(&cfg.quality, &infra)?;
+    let popularity = build_popularity(&cfg.popularity, &infra)?;
+
+    // Build policy (default: my side → quality; opp → popularity)
+    let my_side = cfg.policy.resolve_side_override(cli.side.as_str())?;
+    let policy = SideSplitPolicy::new(my_side, cfg.policy.cp_window, cfg.policy.min_play_rate);
+
+    // Orchestrator
+    let orch = Orchestrator::new(cfg.search.clone(), policy, quality, popularity);
+    let root = orch
+        .build_from_start(cli.start.as_deref(), cli.plies)
+        .await?;
+
+    // Write PGN
+    let writer = PgnWriter;
+    let pgn = writer.write(&root)?;
+    std::fs::write(&cli.out, pgn)?;
+    eprintln!("Wrote {}", cli.out);
+    Ok(())
+}
+</file>
+
+<file path="Cargo.toml">
+[package]
+edition="2024"
+name   ="repgrow"
+version="0.1.0"
+
+[dependencies]
+anyhow            ="1"
+assert_cmd = "2.0.17"
+async-trait       ="0.1"
+clap              ={ version="4", features=["derive"] }
+clap_builder      ="4.5.47"
+dashmap           ="6"
+derive_builder    ="0.20.2"
+governor          ="0.6"
+moka              ={ version="0.12", features=["future"] }
+once_cell = "1.21.3"
+rand              ="0.8"
+reqwest           ={ version="0.12", features=["brotli", "deflate", "gzip", "json", "rustls-tls"] }
+serde             ={ version="1", features=["derive"] }
+serde_json        ="1"
+shakmaty          ={ version="0.24" }
+thiserror         ="1"
+tokio             ={ version="1", features=["macros", "rt-multi-thread", "sync", "time"] }
+toml              ="0.8"
+tracing           ="0.1"
+tracing-subscriber="0.3"
+urlencoding       ="2.1.3"
+
+[dev-dependencies]
+proptest="1.4"
+tempfile="3.22.0"
+</file>
+
+<file path="src/domain/mod.rs">
+pub mod candidate_move;
+pub mod candidate_request;
+pub mod centipawns;
+pub mod chess;
+pub mod color;
+pub mod eval_line;
+pub mod fen_key;
+pub mod play_rate;
+pub mod popularity_row;
+pub mod repertoire_node;
+pub mod signals;
+
+pub use candidate_move::CandidateMove;
+pub use candidate_request::CandidateRequest;
+pub use centipawns::Centipawns;
+pub use color::PieceColor;
+pub use eval_line::EvalLine;
+pub use fen_key::FenKey;
+pub use play_rate::PlayRate;
+pub use popularity_row::PopularityRow;
+pub use repertoire_node::RepertoireNode;
+pub use signals::Signals;
+</file>
+
+<file path="src/infra/mod.rs">
+use crate::config::AppConfig;
+use crate::infra::cache::MemCache;
+use crate::infra::{rate::RateLimiter, singleflight::SingleFlight};
+use std::sync::Arc;
+
+pub mod cache;
+pub mod http;
+pub mod rate;
+pub mod scheduler;
+pub mod singleflight;
+
+/// Bundle of shared infra for providers/orchestrator.
+#[derive(Clone, Debug)]
+pub struct Infra {
+    pub cache_fen: Arc<MemCache<String, serde_json::Value>>, // example: cache raw blobs by FEN
+    pub single: Arc<SingleFlight<String, serde_json::Value>>,
+    pub rate_cloud: RateLimiter,
+    pub rate_explorer: RateLimiter,
+    pub http: reqwest::Client,
+    pub sched: scheduler::TokioScheduler,
+}
+
+pub fn build_infra(cfg: &AppConfig) -> anyhow::Result<Infra> {
+    let cache_fen = Arc::new(MemCache::new(cfg.cache.entries, cfg.cache.ttl_secs));
+    let single = Arc::new(SingleFlight::new());
+    Ok(Infra {
+        cache_fen,
+        single,
+        rate_cloud: RateLimiter::per_sec(cfg.rate.cloud_per_sec),
+        rate_explorer: RateLimiter::per_sec(cfg.rate.explorer_per_sec),
+        http: http::build_http(cfg.http.timeout_ms),
+        sched: scheduler::TokioScheduler,
+    })
+}
+</file>
+
+<file path="src/search/worker.rs">
+use super::{arena::NodeArenaStore, util::apply_uci};
+use crate::{
+    config::SearchConfig,
+    domain::{CandidateRequest, Centipawns, FenKey, PlayRate, RepertoireNode},
+    policy::{Decision, MovePolicy},
+    provider::{MovePopularity, MoveQuality, normalize_popularity, normalize_quality},
+};
+use dashmap::DashSet;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tracing::debug;
+
+pub async fn expand_node_task(
+    nid: u64,
+    max_plies: u32,
+    cfg: &SearchConfig,
+    policy: &dyn MovePolicy,
+    quality: &Arc<dyn MoveQuality>,
+    popularity: &Arc<dyn MovePopularity>,
+    arena: &dyn NodeArenaStore,
+    seen: &DashSet<FenKey>,
+    tx: &mpsc::Sender<u64>,
+) -> anyhow::Result<()> {
+    debug!("expand_node_task: node_id={}, max_plies={}", nid, max_plies);
+    // Snapshot minimal node data
+    let (fen_key, ply_depth) = {
+        let n = arena
+            .get(nid)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("missing node {nid}"))?;
+        (n.fen_key.clone(), n.ply_depth)
+    };
+    debug!(
+        "Expanding node: id={}, fen={}, ply_depth={}",
+        nid, fen_key.fen_string, ply_depth
+    );
+
+    if ply_depth >= max_plies {
+        debug!("Node id={} reached max_plies, skipping expansion", nid);
+        return Ok(());
+    }
+    if !seen.insert(fen_key.clone()) {
+        debug!("Node id={} already seen, skipping expansion", nid);
+        return Ok(());
+    }
+
+    let mut req = CandidateRequest {
+        fen_key: fen_key.clone(),
+        max_candidates: 8,
+        cp_window: Centipawns::from_int(50),
+        min_play_rate: PlayRate::new(0.01),
+        multipv: 8,
+    };
+
+    let is_my_side = matches!(
+        policy.decide(fen_key.side_to_move.to_shakmaty()),
+        Decision::Quality
+    );
+    debug!(
+        "Fetching candidates for node id={}, fen={}",
+        nid, fen_key.fen_string
+    );
+    policy.adjust(&mut req, is_my_side);
+
+    let mut cands = match policy.decide(fen_key.side_to_move.to_shakmaty()) {
+        Decision::Quality => {
+            let evals = quality.evaluate(&req.fen_key, Some(req.multipv)).await?;
+            debug!("Quality evals for node id={}: {:?}", nid, evals);
+            normalize_quality(&req.fen_key, evals)
+        }
+        Decision::Popularity => {
+            let rows = popularity.sample(&req.fen_key).await?;
+            debug!("Popularity rows for node id={}: {:?}", nid, rows);
+            normalize_popularity(&req.fen_key, rows)
+        }
+        Decision::Hybrid => {
+            debug!("Hybrid decision for node id={}: not implemented", nid);
+            Vec::new()
+        }
+    };
+
+    // Post-filter + cap
+    cands = policy.post_filter(cands);
+    let cap = if is_my_side {
+        cfg.max_children_my_side
+    } else {
+        cfg.max_children_opp_side
+    };
+    cands.truncate(cap.expect("max_children should be set"));
+
+    debug!("Node id={} candidates after filter/cap: {:?}", nid, cands);
+    // Apply moves → create children → enqueue
+    let mut child_ids = Vec::with_capacity(cands.len());
+    for c in cands {
+        if let Ok((next_fen, _stm)) = apply_uci(&fen_key, &c.uci.to_uci()) {
+            let child = RepertoireNode {
+                id: 0,
+                parent: Some(nid),
+                fen_key: next_fen.clone(),
+                last_move_uci: Some(c.uci.clone()),
+                ply_depth: ply_depth + 1,
+                children: Vec::new(),
+                signals: Default::default(),
+            };
+            let child_id = arena.push(child).await;
+            arena.push_child(nid, child_id).await;
+            debug!(
+                "Node id={} child created: id={}, fen={}",
+                nid, child_id, next_fen.fen_string
+            );
+            child_ids.push(child_id);
+        }
+    }
+
+    for cid in &child_ids {
+        debug!("Enqueuing child node id={} for expansion", cid);
+        tx.send(*cid).await.ok();
+    }
+    debug!("expand_node_task finished for node id={}", nid);
+    Ok(())
+}
+</file>
+
 <file path="src/provider/mod.rs">
+use tracing::debug;
+// debug!("build_quality called with engine/source: {:?}", cfg.engine);
 pub mod cloud_eval;
 pub mod explorer;
 pub mod move_popularity;
@@ -1367,7 +4471,7 @@ pub use types::CandidateMoves;
 
 use crate::{
     config::{PopularityConfig, QualityConfig},
-    domain::{CandidateMove, EvalLine, FenKey, PlayRate, PopularityRow, Signals},
+    domain::{CandidateMove, FenKey, PopularityRow, Signals},
     infra::Infra,
     provider::{cloud_eval::build_lichess_eval_client, types::EvalLines},
 };
@@ -1376,8 +4480,9 @@ use std::sync::Arc;
 /// Factory: late-bind providers from config.
 pub fn build_quality(cfg: &QualityConfig, _infra: &Infra) -> anyhow::Result<Arc<dyn MoveQuality>> {
     let client = build_lichess_eval_client(&cfg.base_url, cfg.multi_pv, cfg.clone());
-    match cfg.provider.as_str() {
-        "cloud_eval" => Ok(Arc::new(client)),
+    debug!("build_quality called with source: {:?}", cfg.source);
+    match cfg.source.as_str() {
+        "cloud" => Ok(Arc::new(client)),
         other => anyhow::bail!("unknown quality provider '{other}'"),
     }
 }
@@ -1385,7 +4490,7 @@ pub fn build_popularity(
     cfg: &PopularityConfig,
     infra: &Infra,
 ) -> anyhow::Result<Arc<dyn MovePopularity>> {
-    match cfg.provider.as_str() {
+    match cfg.source.as_str() {
         "explorer" => Ok(Arc::new(Explorer::new(cfg.clone(), infra.clone()))),
         other => anyhow::bail!("unknown popularity provider '{other}'"),
     }
@@ -1396,9 +4501,12 @@ pub fn normalize_quality(fen: &FenKey, lines: EvalLines) -> CandidateMoves {
     lines
         .into_iter()
         .map(|l| {
-            let mut sig = Signals::default();
-            sig.eval_cp = Some(l.eval_cp as f32);
-            sig.depth = Some(l.depth);
+            let sig = Signals {
+                play_rate: None,
+                games: None,
+                eval_cp: Some(l.eval_cp),
+                depth: Some(l.depth),
+            };
             // next_fen is filled by orchestrator using shakmaty (legal move application)
             CandidateMove {
                 uci: l.uci,
@@ -1408,12 +4516,15 @@ pub fn normalize_quality(fen: &FenKey, lines: EvalLines) -> CandidateMoves {
         })
         .collect()
 }
+
 pub fn normalize_popularity(fen: &FenKey, rows: Vec<PopularityRow>) -> CandidateMoves {
     rows.into_iter()
         .map(|r| {
-            let mut sig = Signals::default();
-            sig.play_rate = Some(PlayRate::new(r.play_rate));
-            sig.games = Some(r.games);
+            let sig = Signals {
+                play_rate: Some(r.play_rate),
+                games: Some(r.games),
+                ..Default::default()
+            };
             CandidateMove {
                 uci: r.uci,
                 next_fen: fen.clone(),
@@ -1421,874 +4532,6 @@ pub fn normalize_popularity(fen: &FenKey, rows: Vec<PopularityRow>) -> Candidate
             }
         })
         .collect()
-}
-</file>
-
-<file path="src/provider/popularity_caps.rs">
-pub struct PopularityCaps {
-    pub supports_filters: bool,
-}
-</file>
-
-<file path="src/provider/quality_caps.rs">
-pub struct QualityCaps {
-    pub max_multipv: usize,
-}
-
-impl Default for QualityCaps {
-    fn default() -> Self {
-        Self { max_multipv: 10 }
-    }
-}
-</file>
-
-<file path="src/provider/types.rs">
-use super::{CandidateMove, EvalLine};
-
-pub type CandidateMoves = Vec<CandidateMove>;
-pub type EvalLines = Vec<EvalLine>;
-</file>
-
-<file path="src/search/arena/mem_arena.rs">
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-use crate::{domain::RepertoireNode, search::arena::NodeArenaStore};
-
-/// In-memory arena backed by Arc<Mutex<Vec<RepertoireNode>>>
-#[derive(Clone, Default)]
-pub struct MemArena {
-    inner: Arc<Mutex<Vec<RepertoireNode>>>,
-}
-
-impl MemArena {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl NodeArenaStore for MemArena {
-    async fn len(&self) -> usize {
-        self.inner.lock().await.len()
-    }
-
-    async fn get(&self, id: u64) -> Option<RepertoireNode> {
-        self.inner.lock().await.get(id as usize).cloned()
-    }
-
-    async fn push(&self, node: RepertoireNode) -> u64 {
-        let mut g = self.inner.lock().await;
-        let id = g.len() as u64;
-        let mut n = node;
-        n.id = id;
-        g.push(n);
-        id
-    }
-
-    async fn push_child(&self, parent: u64, child_id: u64) {
-        let mut g = self.inner.lock().await;
-        if let Some(p) = g.get_mut(parent as usize) {
-            p.children.push(child_id);
-        }
-    }
-}
-</file>
-
-<file path="src/search/arena/mod.rs">
-pub mod mem_arena;
-pub mod node_arena_store;
-
-pub use mem_arena::MemArena;
-pub use node_arena_store::NodeArenaStore;
-</file>
-
-<file path="src/search/arena/node_arena_store.rs">
-use crate::domain::RepertoireNode;
-
-#[async_trait::async_trait]
-pub trait NodeArenaStore: Send + Sync {
-    async fn len(&self) -> usize;
-    async fn get(&self, id: u64) -> Option<RepertoireNode>;
-    async fn push(&self, node: RepertoireNode) -> u64; // returns id
-    async fn push_child(&self, parent: u64, child_id: u64);
-}
-</file>
-
-<file path="src/search/build/make_node.rs">
-use crate::domain::{FenKey, RepertoireNode};
-
-/// Create a node struct (id assigned by arena)
-pub fn make_node(
-    parent: Option<u64>,
-    fen_key: &FenKey,
-    last_uci: Option<String>,
-    ply: u32,
-) -> RepertoireNode {
-    RepertoireNode {
-        id: 0, // arena will set real id
-        parent,
-        fen_key: fen_key.clone(),
-        last_move_uci: last_uci,
-        ply_depth: ply,
-        children: Vec::new(),
-        signals: Default::default(),
-    }
-}
-</file>
-
-<file path="src/search/build/mod.rs">
-pub mod make_node;
-pub mod start_from_san;
-</file>
-
-<file path="src/search/build/start_from_san.rs">
-use crate::domain::{FenKey, PieceColor};
-use shakmaty::{fen::Fen, san::San, Chess, EnPassantMode::Legal, Position};
-
-/// Parse a SAN line into a starting FenKey (and stm)
-pub fn start_from_san(san_line: Option<&str>) -> anyhow::Result<(FenKey, shakmaty::Color)> {
-    let mut pos = Chess::default();
-    if let Some(line) = san_line {
-        for tok in line.split_whitespace() {
-            if tok.contains('.') {
-                continue;
-            }
-            let san: San = tok.parse().map_err(|_| anyhow::anyhow!("bad SAN: {tok}"))?;
-            let mv = san
-                .to_move(&pos)
-                .map_err(|_| anyhow::anyhow!("illegal SAN: {tok}"))?;
-            pos.play_unchecked(&mv);
-        }
-    }
-    let fen = Fen::from_position(pos.clone(), Legal).to_string();
-    let stm = pos.turn();
-    Ok((
-        FenKey {
-            fen,
-            stm: PieceColor::from_shakmaty(stm),
-        },
-        stm,
-    ))
-}
-</file>
-
-<file path="src/search/mod.rs">
-pub mod arena;
-pub mod build;
-pub mod dispatcher;
-pub mod orchestrator;
-pub mod util;
-pub mod worker;
-</file>
-
-<file path="src/search/orchestrator.rs">
-use crate::{
-    config::SearchConfig,
-    domain::{CandidateRequest, FenKey, PieceColor, RepertoireNode},
-    infra::Infra,
-    policy::{Decision, MovePolicy, SideSplitPolicy},
-    provider::{normalize_popularity, normalize_quality, MovePopularity, MoveQuality},
-};
-use anyhow::{anyhow, Result};
-use dashmap::DashSet;
-use shakmaty::{
-    fen::Fen, san::San, uci::Uci, CastlingMode::Standard, Chess, Color, EnPassantMode::Legal,
-    Position,
-};
-use std::sync::Arc;
-use tokio::{
-    spawn,
-    sync::{mpsc, Mutex},
-};
-
-type SafeRepertoireNodeList = Arc<Mutex<Vec<RepertoireNode>>>;
-type MoveProviderSelectionPolicy = Arc<dyn MovePolicy>;
-
-/// Orchestrator: build repertoire tree from a starting position (FEN or SAN line).
-/// Uses a bounded pool of workers to expand nodes concurrently.
-/// The mutable arena is owned here behind an async-friendly lock.
-/// The seen set is a concurrent DashSet to avoid duplicate positions.
-pub struct Orchestrator {
-    /// Immutable config + providers + infra
-    cfg: Option<SearchConfig>,
-
-    /// `policy` decides which provider to use per position.
-    /// Policy used to decide which move provider to use per position.
-    /// This is an Arc-wrapped trait object for thread-safe shared ownership.
-    policy: MoveProviderSelectionPolicy,
-
-    /// `quality` provider (e.g. Lichess cloud eval).
-    quality: Arc<dyn MoveQuality>,
-
-    /// `popularity` provider (e.g. Lichess openings explorer).
-    popularity: Arc<dyn MovePopularity>,
-
-    /// Infra (e.g. HTTP client, rate limiters, cache).
-    infra: Infra,
-
-    /// Mutable repertoire nodes (arena).
-    nodes: SafeRepertoireNodeList,
-
-    /// Concurrent set of seen FENs to avoid hitting the API multiple times.
-    /// Expecting many lines will share positions, so this is important.
-    /// DashSet is Sync and can be shared across workers.
-    seen: DashSet<FenKey>,
-}
-
-impl Orchestrator {
-    /// Create a new orchestrator with the given config, policy, providers, and infra.
-    /// The mutable arena and seen set are initialized empty.
-    /// The providers should be built from the same infra to share HTTP, cache, rate limit
-    pub fn new(
-        cfg: Option<SearchConfig>,
-        policy: MoveProviderSelectionPolicy,
-        quality: Arc<dyn MoveQuality>,
-        popularity: Arc<dyn MovePopularity>,
-        infra: Infra,
-    ) -> Self {
-        let c = cfg.unwrap_or_default();
-        Self {
-            cfg: Some(c),
-            policy,
-            quality,
-            popularity,
-            infra,
-            nodes: Arc::new(Mutex::new(Vec::new())),
-            seen: DashSet::new(),
-        }
-    }
-
-    /// Return the configured concurrency level.
-    pub fn concurrency(&self) -> usize {
-        self.cfg.as_ref().map_or(4, |c| c.concurrency)
-    }
-
-    /// Return the configured max total nodes, or 1000000000 if not set.
-    pub fn max_total_nodes(&self) -> usize {
-        self.cfg
-            .as_ref()
-            .and_then(|c| c.max_total_nodes)
-            .unwrap_or(1000000000)
-    }
-
-    /// Return the configured max children for my side, or 10000 if not set.
-    pub fn max_children_my_side(&self) -> usize {
-        self.cfg
-            .as_ref()
-            .and_then(|c| c.max_children_my_side)
-            .unwrap_or(10000)
-    }
-
-    /// Return the configured max children for opponent's side, or 10000 if not set.
-    pub fn max_children_opp_side(&self) -> usize {
-        self.cfg
-            .as_ref()
-            .and_then(|c| c.max_children_opp_side)
-            .unwrap_or(10000)
-    }
-
-    /// Build the repertoire tree from the given SAN line (or startpos if None).
-    /// Expands nodes up to max_plies using a bounded pool of workers.
-    /// Returns the root node of the built tree.
-    /// The tree is stored in an arena (Vec) inside a Mutex for async safety.
-    /// Each worker fetches candidates from the appropriate provider based on policy.
-    /// The seen set avoids duplicate positions across lines.
-    /// The max_plies limits the depth of the tree.
-    /// The concurrency config controls the number of worker tasks.
-    /// This function is async and should be awaited.
-    pub async fn build_from_start(
-        &self,
-        san_line: Option<&str>,
-        max_plies: u32,
-    ) -> Result<RepertoireNode> {
-        let (root_fen, _stm) = self.start_from_san(san_line)?;
-        let root_repertoire_node = self.push_node(None, &root_fen, None, 0).await?;
-
-        let max_message_buffer_size = self.concurrency() * 4;
-        let (sender, mut receiver) = mpsc::channel::<u64>(max_message_buffer_size);
-
-        sender.send(root_repertoire_node.id).await.ok();
-
-        // Clone all the Arcs/config needed by workers (no &mut self captured)
-        let nodes = Arc::clone(&self.nodes);
-        let seen = &self.seen;
-        let policy = Arc::clone(&self.policy);
-        let quality = Arc::clone(&self.quality);
-        let popularity = Arc::clone(&self.popularity);
-        let cfg = self.cfg.clone();
-
-        // Spawn bounded worker pool
-        for _ in 0..self.concurrency() {
-            let receiver2 = receiver;
-            let sender2 = sender.clone();
-            let nodes2 = Arc::clone(&nodes);
-            let policy2 = Arc::clone(&policy);
-            let quality2 = Arc::clone(&quality);
-            let popularity2 = Arc::clone(&popularity);
-            let seen2 = seen; // DashSet is Sync
-            let cfg2 = cfg.clone();
-
-            spawn(async move {
-                let mut receiver3 = receiver2;
-                while let Some(nid) = receiver3.recv().await {
-                    let cfg_copy = cfg2.expect("cfg should be set").clone();
-
-                    // Expand node; on success, enqueue children
-                    match expand_node_task(
-                        nid,
-                        max_plies,
-                        &cfg_copy,
-                        policy2.as_ref(),
-                        &quality2,
-                        &popularity2,
-                        &nodes2,
-                        seen2,
-                        &sender2,
-                    )
-                    .await
-                    {
-                        Err(_e) => {}
-                        Ok(_) => todo!(),
-                    }
-                }
-            });
-        }
-
-        drop(sender); // allow workers to exit when the queue drains
-
-        // Wait until the receiver side is fully dropped (all workers exited)
-        while receiver.recv().await.is_some() {}
-
-        Ok(root_repertoire_node)
-    }
-
-    fn start_from_san(&self, san_line: Option<&str>) -> Result<(FenKey, Color)> {
-        let mut position = Chess::default();
-        if let Some(line) = san_line {
-            // Loop over tokens, ignoring move numbers (e.g. "1.", "2.", etc)
-            for token in line.split_whitespace() {
-                if token.contains('.') {
-                    continue;
-                }
-
-                // Parse SAN into a SAN struct
-                // let san: San = token.parse().map_err(|_| anyhow!("bad SAN: {token}"))?;
-                let san_move = token
-                    .parse::<San>()
-                    .map_err(|_| anyhow!("bad SAN: {token}"))?
-                    .to_move(&position)
-                    .map_err(|_| anyhow!("illegal SAN: {token}"))?;
-
-                // Apply the move to the position (we can play_unchecked since it
-                // was validated in the previous step)
-                position.play_unchecked(&san_move);
-            }
-        }
-        let fen = Fen::from_position(position.clone(), Legal).to_string();
-        let stm = position.turn();
-        Ok((
-            FenKey {
-                fen,
-                stm: PieceColor::from_shakmaty(stm),
-            },
-            stm,
-        ))
-    }
-
-    async fn push_node(
-        &self,
-        parent: Option<u64>,
-        fen_key: &FenKey,
-        last_uci: Option<String>,
-        ply: u32,
-    ) -> Result<RepertoireNode> {
-        let mut nodes = self.nodes.lock().await;
-        let id = nodes.len() as u64;
-        let node = RepertoireNode {
-            id,
-            parent,
-            fen_key: fen_key.clone(),
-            last_move_uci: last_uci,
-            ply_depth: ply,
-            children: Vec::new(),
-            signals: Default::default(),
-        };
-        nodes.push(node.clone());
-        Ok(node)
-    }
-}
-
-// ------------- worker function (no &mut self captured) ----------------
-
-/// Given a locked set of nodes, expand the given node ID and return the FEN string.
-async fn expand_node_fen(nodes: &SafeRepertoireNodeList, node_id: u64) -> Option<FenKey> {
-    let nodes_guard = nodes.lock().await;
-    let node = &nodes_guard[node_id as usize];
-    Some(node.fen_key.clone())
-}
-
-/// Given a node ID, return its ply depth.
-async fn expand_node_ply(nodes: &SafeRepertoireNodeList, node_id: u64) -> Option<u32> {
-    let nodes_guard = nodes.lock().await;
-    let node = &nodes_guard[node_id as usize];
-    Some(node.ply_depth)
-}
-
-/// Given a node ID, return its fen key and ply depth.
-/// Returns None if the node ID is invalid.
-async fn expand_node_snapshot(nodes: &SafeRepertoireNodeList, nid: u64) -> Option<(FenKey, u32)> {
-    let nodes_guard = nodes.lock().await;
-    let n = nodes_guard.get(nid as usize)?;
-    Some((n.fen_key.clone(), n.ply_depth))
-}
-
-async fn expand_node_task(
-    node_id: u64,
-    max_plies: u32,
-    cfg: &SearchConfig,
-    policy: &MoveProviderSelectionPolicy,
-    quality: &Arc<dyn MoveQuality>,
-    popularity: &Arc<dyn MovePopularity>,
-    nodes: &SafeRepertoireNodeList,
-    seen: &DashSet<FenKey>,
-    sender: &mpsc::Sender<u64>,
-) -> Result<()> {
-    // Snapshot what we need from the node (avoid holding the lock too long)
-    let fen_key = expand_node_fen(nodes, node_id)
-        .await
-        .ok_or_else(|| anyhow!("missing node {node_id}"))?;
-
-    let ply_depth = expand_node_ply(nodes, node_id)
-        .await
-        .ok_or_else(|| anyhow!("missing node {node_id}"))?;
-
-    if ply_depth >= max_plies {
-        return Ok(());
-    }
-
-    if !seen.insert(fen_key.clone()) {
-        return Ok(());
-    }
-
-    let mut req = CandidateRequest {
-        fen_key: fen_key.clone(),
-        max_candidates: 8,
-        cp_window: 50.0,
-        min_play_rate: 0.07,
-        multipv: 8,
-    };
-
-    let is_my_side = matches!(policy.decide(fen_key.stm.to_shakmaty()), Decision::Quality);
-    policy.adjust(&mut req, is_my_side);
-
-    // Fetch candidates (no arena mutation yet)
-    let mut cands = match policy.decide(fen_key.stm.to_shakmaty()) {
-        Decision::Quality => {
-            let evals = quality.evaluate(&req.fen_key, Some(req.multipv)).await?;
-            normalize_quality(&req.fen_key, evals)
-        }
-        Decision::Popularity => {
-            let rows = popularity.sample(&req.fen_key).await?;
-            normalize_popularity(&req.fen_key, rows)
-        }
-        Decision::Hybrid => {
-            // (future) shortlist via popularity then filter via quality
-            Vec::new()
-        }
-    };
-
-    // Post-filter + cap by side
-    cands = policy.post_filter(cands);
-    let cap = if is_my_side {
-        cfg.max_children_my_side
-    } else {
-        cfg.max_children_opp_side
-    };
-    cands.truncate(cap.expect("max_children should be set"));
-
-    // Build children by applying UCI → next FEN, then mutate arena atomically
-    let mut new_child_ids = Vec::with_capacity(cands.len());
-    for c in cands {
-        if let Ok((next_fen, _stm)) = apply_uci(&fen_key, &c.uci) {
-            // push_node equivalent under the lock
-            let mut nodes_guard = nodes.lock().await;
-            let new_id = nodes_guard.len() as u64;
-            let child = RepertoireNode {
-                id: new_id,
-                parent: Some(node_id),
-                fen_key: next_fen,
-                last_move_uci: Some(c.uci.clone()),
-                ply_depth: ply_depth + 1,
-                children: Vec::new(),
-                signals: Default::default(),
-            };
-            nodes_guard.push(child);
-            nodes_guard[node_id as usize].children.push(new_id);
-            new_child_ids.push(new_id);
-        }
-    }
-
-    // Enqueue children for further expansion
-    for cid in new_child_ids {
-        sender.send(cid).await.ok();
-    }
-
-    Ok(())
-}
-
-// ------------- small helpers (pure) ----------------
-
-fn apply_uci(fen_key: &FenKey, uci: &str) -> Result<(FenKey, Color)> {
-    let pos: Chess = fen_key
-        .fen
-        .parse::<shakmaty::fen::Fen>()?
-        .into_position(Standard)?;
-    let u: Uci = uci.parse()?;
-    let m: shakmaty::Move = u.to_move(&pos).map_err(|_| anyhow!("illegal UCI"))?;
-    let mut next = pos.clone();
-    next.play_unchecked(&m);
-    let next_fen = shakmaty::fen::Fen::from_position(next.clone(), Legal).to_string();
-    Ok((
-        FenKey {
-            fen: next_fen,
-            stm: PieceColor::from_shakmaty(next.turn()),
-        },
-        next.turn(),
-    ))
-}
-</file>
-
-<file path="src/search/util.rs">
-use crate::domain::{FenKey, PieceColor};
-use shakmaty::{fen, uci::Uci, CastlingMode::Standard, Chess, EnPassantMode::Legal, Position};
-
-pub fn apply_uci(fen_key: &FenKey, uci: &str) -> anyhow::Result<(FenKey, shakmaty::Color)> {
-    let position: Chess = fen_key.fen.parse::<fen::Fen>()?.into_position(Standard)?;
-    let u: Uci = uci.parse()?;
-    let m = u
-        .to_move(&position)
-        .map_err(|_| anyhow::anyhow!("illegal UCI"))?;
-    let mut next = position.clone();
-    next.play_unchecked(&m);
-    let next_fen = fen::Fen::from_position(next.clone(), Legal).to_string();
-    Ok((
-        FenKey {
-            fen: next_fen,
-            stm: PieceColor::from_shakmaty(next.turn()),
-        },
-        next.turn(),
-    ))
-}
-</file>
-
-<file path="src/cli.rs">
-use clap::Parser;
-
-/// CLI for building a repertoire PGN by composing quality and popularity providers.
-#[derive(Parser, Debug)]
-pub struct Cli {
-    /// Path to config TOML
-    #[arg(long, default_value = "config.toml")]
-    config: String,
-    /// Side for which to optimize (white|black)
-    #[arg(long)]
-    side: String,
-    /// Ply budget
-    #[arg(long)]
-    plies: u32,
-    /// Starting moves in SAN (e.g., "1.e4 e5 2.Nf3 Nc6")
-    #[arg(long)]
-    start: Option<String>,
-    /// Output PGN path
-    #[arg(long, default_value = "repertoire.pgn")]
-    out: String,
-}
-</file>
-
-<file path="src/lib.rs">
-pub mod config;
-pub mod domain;
-pub mod policy;
-pub mod search;
-pub mod provider;
-pub mod infra;
-pub mod pgn;
-pub mod cli;
-
-pub use cli::Cli;
-</file>
-
-<file path="src/main.rs">
-use repgrow::{config::AppConfig, policy::SideSplitPolicy, provider, search::orchestrator::Orchestrator, pgn::writer::PgnWriter};
-use shakmaty::{Chess, san::San};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    let cfg = AppConfig::load(&cli.config)?;
-
-    // Build infra
-    let infra = repgrow::infra::build_infra(&cfg)?;
-
-    // Build providers from config (factory)
-    let quality = provider::build_quality(&cfg.quality, &infra)?;
-    let popularity = provider::build_popularity(&cfg.popularity, &infra)?;
-
-    // Build policy (default: my side → quality; opp → popularity)
-    let my_side = cfg.policy.resolve_side_override(cli.side.as_str())?;
-    let policy = SideSplitPolicy::new(my_side, cfg.policy.cp_window, cfg.policy.min_play_rate);
-
-    // Orchestrator
-    let mut orch = Orchestrator::new(cfg.search.clone(), policy, quality, popularity, infra.clone());
-    let root = orch.build_from_start(cli.start.as_deref(), cli.plies).await?;
-
-    // Write PGN
-    let writer = PgnWriter::default();
-    let pgn = writer.write(&root)?;
-    std::fs::write(&cli.out, pgn)?;
-    eprintln!("Wrote {}", cli.out);
-    Ok(())
-}
-</file>
-
-<file path="tests/contract_popularity.rs">
-use repgrow::{provider::{MovePopularity, PopularityCaps}, domain::FenKey};
-
-struct DummyP;
-#[async_trait::async_trait]
-impl MovePopularity for DummyP {
-    async fn sample(&self, _fen: &FenKey) -> anyhow::Result<Vec<repgrow::domain::PopularityRow>> {
-        Ok(vec![
-            repgrow::domain::PopularityRow { uci: "e2e4".into(), play_rate: 0.55, games: 1000 },
-            repgrow::domain::PopularityRow { uci: "d2d4".into(), play_rate: 0.25, games: 600 },
-        ])
-    }
-    fn caps(&self) -> PopularityCaps { PopularityCaps { supports_filters: true } }
-}
-
-#[tokio::test]
-async fn popularity_returns_rows() {
-    let p = DummyP;
-    let fen = FenKey { fen: "startpos not real".into(), stm: shakmaty::Color::White };
-    let rows = p.sample(&fen).await.unwrap();
-    assert!(rows.iter().any(|r| r.play_rate > 0.0));
-}
-</file>
-
-<file path="tests/contract_quality.rs">
-use repgrow::{provider::{MoveQuality, modname::QualityCaps}, domain::{FenKey}};
-
-struct DummyQ;
-#[async_trait::async_trait]
-impl MoveQuality for DummyQ {
-    async fn evaluate(&self, _fen: &FenKey, _multipv: usize) -> anyhow::Result<Vec<repgrow::domain::EvalLine>> {
-        Ok(vec![
-            repgrow::domain::EvalLine { uci: "e2e4".into(), eval_cp: 30, depth: 20 },
-            repgrow::domain::EvalLine { uci: "d2d4".into(), eval_cp: 10, depth: 20 },
-        ])
-    }
-    fn caps(&self) -> modname::QualityCaps { modname::QualityCaps { max_multipv: 8 } }
-}
-
-#[tokio::test]
-async fn quality_returns_lines() {
-    let q = DummyQ;
-    let fen = FenKey { fen: "startpos not real".into(), stm: shakmaty::Color::White };
-    let lines = q.evaluate(&fen, 4).await.unwrap();
-    assert!(lines.len() >= 1);
-}
-</file>
-
-<file path="tests/pgn_golden.rs">
-#[test]
-fn pgn_writer_minimal() {
-    let writer = repgrow::pgn::writer::PgnWriter::default();
-    // Minimal fake node; in practice supply arena & real traversal.
-    let root = repgrow::domain::RepertoireNode {
-        id: 0, parent: None,
-        fen_key: repgrow::domain::FenKey { fen: "dummy".into(), stm: shakmaty::Color::White },
-        last_move_uci: None, ply_depth: 0, children: vec![], signals: Default::default()
-    };
-    let pgn = writer.write(&root).unwrap();
-    assert!(pgn.contains("[Event"));
-}
-</file>
-
-<file path=".gitignore">
-/target
-</file>
-
-<file path="Cargo.toml">
-[package]
-name = "repgrow"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-anyhow = "1"
-thiserror = "1"
-async-trait = "0.1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-reqwest = { version = "0.12", features = ["json", "gzip", "brotli", "deflate", "rustls-tls"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-toml = "0.8"
-moka = { version = "0.12", features = ["future"] }
-dashmap = "6"
-governor = "0.6"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-shakmaty = { version = "0.24" }
-clap = { version = "4", features = ["derive"] }
-rand = "0.8"
-urlencoding = "2.1.3"
-
-[dev-dependencies]
-proptest = "1.4"
-</file>
-
-<file path="src/infra/cache/mod.rs">
-pub mod kv_cache;
-pub mod mem_cache;
-
-pub use kv_cache::KvCache;
-pub use mem_cache::MemCache;
-</file>
-
-<file path="src/infra/mod.rs">
-use crate::config::AppConfig;
-use crate::infra::cache::MemCache;
-use crate::infra::{rate::RateLimiter, singleflight::SingleFlight};
-use std::sync::Arc;
-
-pub mod cache;
-pub mod http;
-pub mod rate;
-pub mod scheduler;
-pub mod singleflight;
-
-/// Bundle of shared infra for providers/orchestrator.
-#[derive(Clone)]
-pub struct Infra {
-    pub cache_fen: Arc<MemCache<String, serde_json::Value>>, // example: cache raw blobs by FEN
-    pub single: Arc<SingleFlight<String, serde_json::Value>>,
-    pub rate_cloud: RateLimiter,
-    pub rate_explorer: RateLimiter,
-    pub http: reqwest::Client,
-    pub sched: scheduler::TokioScheduler,
-}
-
-pub fn build_infra(cfg: &AppConfig) -> anyhow::Result<Infra> {
-    let cache_fen = Arc::new(MemCache::new(cfg.cache.entries, cfg.cache.ttl_secs));
-    let single = Arc::new(SingleFlight::new());
-    Ok(Infra {
-        cache_fen,
-        single,
-        rate_cloud: RateLimiter::per_sec(cfg.rate.cloud_per_sec),
-        rate_explorer: RateLimiter::per_sec(cfg.rate.explorer_per_sec),
-        http: http::build_http(cfg.http.timeout_ms),
-        sched: scheduler::TokioScheduler::default(),
-    })
-}
-</file>
-
-<file path="src/search/worker.rs">
-use super::{arena::NodeArenaStore, util::apply_uci};
-use crate::{
-    config::SearchConfig,
-    domain::{CandidateRequest, FenKey, RepertoireNode},
-    policy::{Decision, MovePolicy},
-    provider::{normalize_popularity, normalize_quality, MovePopularity, MoveQuality},
-};
-use dashmap::DashSet;
-use std::sync::Arc;
-use tokio::sync::mpsc;
-
-pub async fn expand_node_task(
-    nid: u64,
-    max_plies: u32,
-    cfg: &SearchConfig,
-    policy: &dyn MovePolicy,
-    quality: &Arc<dyn MoveQuality>,
-    popularity: &Arc<dyn MovePopularity>,
-    arena: &dyn NodeArenaStore,
-    seen: &DashSet<FenKey>,
-    tx: &mpsc::Sender<u64>,
-) -> anyhow::Result<()> {
-    // Snapshot minimal node data
-    let (fen_key, ply_depth) = {
-        let n = arena
-            .get(nid)
-            .await
-            .ok_or_else(|| anyhow::anyhow!("missing node {nid}"))?;
-        (n.fen_key.clone(), n.ply_depth)
-    };
-
-    if ply_depth >= max_plies {
-        return Ok(());
-    }
-    if !seen.insert(fen_key.clone()) {
-        return Ok(());
-    }
-
-    let mut req = CandidateRequest {
-        fen_key: fen_key.clone(),
-        max_candidates: 8,
-        cp_window: 50.0,
-        min_play_rate: 0.07,
-        multipv: 8,
-    };
-
-    let is_my_side = matches!(policy.decide(fen_key.stm.to_shakmaty()), Decision::Quality);
-    policy.adjust(&mut req, is_my_side);
-
-    let mut cands = match policy.decide(fen_key.stm.to_shakmaty()) {
-        Decision::Quality => {
-            let evals = quality.evaluate(&req.fen_key, Some(req.multipv)).await?;
-            normalize_quality(&req.fen_key, evals)
-        }
-        Decision::Popularity => {
-            let rows = popularity.sample(&req.fen_key).await?;
-            normalize_popularity(&req.fen_key, rows)
-        }
-        Decision::Hybrid => Vec::new(),
-    };
-
-    // Post-filter + cap
-    cands = policy.post_filter(cands);
-    let cap = if is_my_side {
-        cfg.max_children_my_side
-    } else {
-        cfg.max_children_opp_side
-    };
-    cands.truncate(cap.expect("max_children should be set"));
-
-    // Apply moves → create children → enqueue
-    let mut child_ids = Vec::with_capacity(cands.len());
-    for c in cands {
-        if let Ok((next_fen, _stm)) = apply_uci(&fen_key, &c.uci) {
-            let child = RepertoireNode {
-                id: 0,
-                parent: Some(nid),
-                fen_key: next_fen,
-                last_move_uci: Some(c.uci.clone()),
-                ply_depth: ply_depth + 1,
-                children: Vec::new(),
-                signals: Default::default(),
-            };
-            let child_id = arena.push(child).await;
-            arena.push_child(nid, child_id).await;
-            child_ids.push(child_id);
-        }
-    }
-
-    for cid in child_ids {
-        tx.send(cid).await.ok();
-    }
-    Ok(())
 }
 </file>
 

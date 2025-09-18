@@ -1,3 +1,5 @@
+use tracing::debug;
+// debug!("build_quality called with engine/source: {:?}", cfg.engine);
 pub mod cloud_eval;
 pub mod explorer;
 pub mod move_popularity;
@@ -27,8 +29,9 @@ use std::sync::Arc;
 /// Factory: late-bind providers from config.
 pub fn build_quality(cfg: &QualityConfig, _infra: &Infra) -> anyhow::Result<Arc<dyn MoveQuality>> {
     let client = build_lichess_eval_client(&cfg.base_url, cfg.multi_pv, cfg.clone());
+    debug!("build_quality called with source: {:?}", cfg.source);
     match cfg.source.as_str() {
-        "cloud_eval" => Ok(Arc::new(client)),
+        "cloud" => Ok(Arc::new(client)),
         other => anyhow::bail!("unknown quality provider '{other}'"),
     }
 }

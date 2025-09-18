@@ -12,8 +12,11 @@ use repgrow::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
     let cli = Cli::parse();
-    let cfg = AppConfig::load(&cli.config)?;
+    let cfg = AppConfig::load(cli.config.expect("Cannot find config file").as_ref())?;
 
     // Build infra
     let infra = build_infra(&cfg)?;

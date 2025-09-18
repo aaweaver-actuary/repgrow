@@ -8,6 +8,15 @@ pub enum PieceColor {
 }
 
 impl PieceColor {
+    /// Returns true if the color is white.
+    pub fn is_white(&self) -> bool {
+        matches!(self, PieceColor::White)
+    }
+
+    /// Returns true if the color is black.
+    pub fn is_black(&self) -> bool {
+        matches!(self, PieceColor::Black)
+    }
     /// Returns "white" or "black".
     /// # Examples
     /// ```
