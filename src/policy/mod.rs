@@ -6,7 +6,7 @@ pub use split_side_policy::SideSplitPolicy;
 
 use std::cmp::Ordering;
 
-use crate::domain::{CandidateRequest, PlayRate};
+use crate::domain::{CandidateRequest, Centipawns, PlayRate};
 use crate::provider::types::CandidateMoves;
 use shakmaty::Color;
 
@@ -25,8 +25,8 @@ pub trait MovePolicy: Send + Sync {
     fn post_filter(&self, mut cands: CandidateMoves) -> CandidateMoves {
         // Stable ordering: primary → secondary → UCI for determinism
         cands.sort_by(|a, b| {
-            let pa_eval = a.signals.eval_cp.unwrap_or(-10000.0);
-            let pb_eval = b.signals.eval_cp.unwrap_or(-10000.0);
+            let pa_eval = a.signals.eval_cp.unwrap_or(Centipawns::from_int(-10000));
+            let pb_eval = b.signals.eval_cp.unwrap_or(Centipawns::from_int(-10000));
 
             match pa_eval.partial_cmp(&pb_eval).unwrap_or(Ordering::Equal) {
                 Ordering::Equal => {

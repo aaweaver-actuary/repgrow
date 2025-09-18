@@ -18,7 +18,7 @@ pub use types::CandidateMoves;
 
 use crate::{
     config::{PopularityConfig, QualityConfig},
-    domain::{CandidateMove, EvalLine, FenKey, PlayRate, PopularityRow, Signals},
+    domain::{CandidateMove, Centipawns, EvalLine, FenKey, PlayRate, PopularityRow, Signals},
     infra::Infra,
     provider::{cloud_eval::build_lichess_eval_client, types::EvalLines},
 };
@@ -47,9 +47,12 @@ pub fn normalize_quality(fen: &FenKey, lines: EvalLines) -> CandidateMoves {
     lines
         .into_iter()
         .map(|l| {
-            let mut sig = Signals::default();
-            sig.eval_cp = Some(l.eval_cp as f32);
-            sig.depth = Some(l.depth);
+            let sig = Signals {
+                play_rate: None,
+                games: None,
+                eval_cp: Some(Centipawns::from_int(l.eval_cp)),
+                depth: Some(l.depth),
+            };
             // next_fen is filled by orchestrator using shakmaty (legal move application)
             CandidateMove {
                 uci: l.uci,

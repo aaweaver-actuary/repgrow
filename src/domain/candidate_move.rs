@@ -10,7 +10,7 @@ pub struct CandidateMove {
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::PlayRate;
+    use crate::domain::{Centipawns, PieceColor, PlayRate};
 
     use super::*;
 
@@ -21,10 +21,10 @@ mod tests {
             next_fen: FenKey {
                 fen_string: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
                     .to_string(),
-                side_to_move: crate::domain::PieceColor::Black,
+                side_to_move: PieceColor::Black,
             },
             signals: Signals {
-                eval_cp: Some(0.85),
+                eval_cp: Some(Centipawns::from_float(0.85)),
                 depth: None,
                 play_rate: Some(PlayRate::new(0.75)),
                 games: None,
@@ -36,11 +36,8 @@ mod tests {
             move_.next_fen.fen_string,
             "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
         );
-        assert_eq!(
-            move_.next_fen.side_to_move,
-            crate::domain::PieceColor::Black
-        );
+        assert_eq!(move_.next_fen.side_to_move, PieceColor::Black);
         assert_eq!(move_.signals.play_rate, Some(PlayRate::new(0.75)));
-        assert_eq!(move_.signals.eval_cp, Some(0.85));
+        assert_eq!(move_.signals.eval_cp, Some(Centipawns::from_float(0.85)));
     }
 }

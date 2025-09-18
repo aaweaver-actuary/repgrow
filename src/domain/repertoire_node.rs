@@ -60,7 +60,7 @@ impl Default for RepertoireNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{fen_key::FenKey, PieceColor, Signals};
+    use crate::domain::{Centipawns, PieceColor, Signals, fen_key::FenKey};
 
     #[test]
     fn test_new_node() {
@@ -117,8 +117,8 @@ mod tests {
     #[test]
     fn test_signals_field() {
         let mut node = RepertoireNode::default();
-        node.signals.eval_cp = Some(1.5);
-        assert_eq!(node.signals.eval_cp, Some(1.5));
+        node.signals.eval_cp = Some(Centipawns::from_float(1.5));
+        assert_eq!(node.signals.eval_cp, Some(Centipawns::from_float(1.5)));
     }
 
     #[test]

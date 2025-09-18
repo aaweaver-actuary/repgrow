@@ -1,6 +1,7 @@
 pub mod candidate_move;
 pub mod candidate_request;
 pub mod centipawns;
+pub mod chess;
 pub mod color;
 pub mod eval_line;
 pub mod fen_key;
@@ -8,6 +9,7 @@ pub mod play_rate;
 pub mod popularity_row;
 pub mod repertoire_node;
 pub mod signals;
+pub mod uci;
 
 pub use candidate_move::CandidateMove;
 pub use candidate_request::CandidateRequest;
