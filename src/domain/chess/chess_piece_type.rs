@@ -1,4 +1,6 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ChessPieceType {
     Pawn,
     Knight,
@@ -53,6 +55,25 @@ impl ChessPieceType {
             ChessPieceType::King => 'K',
         }
     }
+
+    /// Extracts the promotion piece type from a UCI promotion string.
+    /// Returns None if the character does not correspond to a valid promotion piece type, or if it is not included.
+    /// # Examples
+    /// ```
+    /// use repgrow::domain::chess::ChessPieceType;
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8q"), Some(ChessPieceType::Queen));
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8n"), Some(ChessPieceType::Knight));
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8"), None);
+    /// assert_eq!(ChessPieceType::from_uci_string("e7e8x"), None);
+    /// ```
+    pub fn from_uci_string(uci: &str) -> Option<Self> {
+        if uci.len() == 5 {
+            let promo_char = uci.chars().nth(4).unwrap();
+            Self::from_char(promo_char)
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -67,14 +88,31 @@ mod tests {
         assert_eq!(ChessPieceType::from_char('r'), Some(ChessPieceType::Rook));
         assert_eq!(ChessPieceType::from_char('q'), Some(ChessPieceType::Queen));
         assert_eq!(ChessPieceType::from_char('k'), Some(ChessPieceType::King));
+    }
 
+    #[test]
+    fn test_from_char_works_for_uppercase_chars() {
         assert_eq!(ChessPieceType::from_char('P'), Some(ChessPieceType::Pawn));
         assert_eq!(ChessPieceType::from_char('N'), Some(ChessPieceType::Knight));
         assert_eq!(ChessPieceType::from_char('B'), Some(ChessPieceType::Bishop));
         assert_eq!(ChessPieceType::from_char('R'), Some(ChessPieceType::Rook));
         assert_eq!(ChessPieceType::from_char('Q'), Some(ChessPieceType::Queen));
         assert_eq!(ChessPieceType::from_char('K'), Some(ChessPieceType::King));
+    }
+
+    #[test]
+    fn test_from_char_returns_none_for_invalid_chars() {
         assert_eq!(ChessPieceType::from_char('1'), None);
         assert_eq!(ChessPieceType::from_char('x'), None);
+    }
+
+    #[test]
+    fn test_to_char_returns_correct_char() {
+        assert_eq!(ChessPieceType::Pawn.to_char(), 'p');
+        assert_eq!(ChessPieceType::Knight.to_char(), 'N');
+        assert_eq!(ChessPieceType::Bishop.to_char(), 'B');
+        assert_eq!(ChessPieceType::Rook.to_char(), 'R');
+        assert_eq!(ChessPieceType::Queen.to_char(), 'Q');
+        assert_eq!(ChessPieceType::King.to_char(), 'K');
     }
 }

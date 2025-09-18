@@ -1,4 +1,15 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChessFileParseError;
+
+impl std::fmt::Display for ChessFileParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid chess file")
+    }
+}
+
+impl std::error::Error for ChessFileParseError {}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChessFile {
     A,
     B,
@@ -32,6 +43,11 @@ impl ChessFile {
         }
     }
 
+    /// Alias for to_u8
+    pub fn to_int(&self) -> u8 {
+        self.to_u8()
+    }
+
     /// Converts the ChessFile to its corresponding character ('a'-'h').
     /// A -> 'a', B -> 'b', ..., H -> 'h'
     /// # Examples
@@ -54,50 +70,34 @@ impl ChessFile {
     }
 
     /// Creates a ChessFile from a u8 value (1-8).
-    /// Returns None for values outside this range.
-    /// # Examples
-    /// ```
-    /// use repgrow::domain::chess::ChessFile;
-    /// assert_eq!(ChessFile::from_u8(1), Some(ChessFile::A));
-    /// assert_eq!(ChessFile::from_u8(8), Some(ChessFile::H));
-    /// assert_eq!(ChessFile::from_u8(9), None);
-    /// assert_eq!(ChessFile::from_u8(0), None);
-    /// ```
-    pub fn from_u8(value: u8) -> Option<Self> {
+    /// Returns an error for values outside this range.
+    pub fn from_u8(value: u8) -> std::result::Result<Self, ChessFileParseError> {
         match value {
-            1 => Some(ChessFile::A),
-            2 => Some(ChessFile::B),
-            3 => Some(ChessFile::C),
-            4 => Some(ChessFile::D),
-            5 => Some(ChessFile::E),
-            6 => Some(ChessFile::F),
-            7 => Some(ChessFile::G),
-            8 => Some(ChessFile::H),
-            _ => None,
+            1 => Ok(ChessFile::A),
+            2 => Ok(ChessFile::B),
+            3 => Ok(ChessFile::C),
+            4 => Ok(ChessFile::D),
+            5 => Ok(ChessFile::E),
+            6 => Ok(ChessFile::F),
+            7 => Ok(ChessFile::G),
+            8 => Ok(ChessFile::H),
+            _ => Err(ChessFileParseError),
         }
     }
 
     /// Creates a ChessFile from a character ('a'-'h' or 'A'-'H').
-    /// Returns None for characters outside this range.
-    /// # Examples
-    /// ```
-    /// use repgrow::domain::chess::ChessFile;
-    /// assert_eq!(ChessFile::from_char('a'), Some(ChessFile::A));
-    /// assert_eq!(ChessFile::from_char('H'), Some(ChessFile::H));
-    /// assert_eq!(ChessFile::from_char('i'), None);
-    /// assert_eq!(ChessFile::from_char('1'), None);
-    /// ```
-    pub fn from_char(c: char) -> Option<Self> {
+    /// Returns an error for characters outside this range.
+    pub fn from_char(c: char) -> std::result::Result<Self, ChessFileParseError> {
         match c {
-            'a' | 'A' => Some(ChessFile::A),
-            'b' | 'B' => Some(ChessFile::B),
-            'c' | 'C' => Some(ChessFile::C),
-            'd' | 'D' => Some(ChessFile::D),
-            'e' | 'E' => Some(ChessFile::E),
-            'f' | 'F' => Some(ChessFile::F),
-            'g' | 'G' => Some(ChessFile::G),
-            'h' | 'H' => Some(ChessFile::H),
-            _ => None,
+            'a' | 'A' => Ok(ChessFile::A),
+            'b' | 'B' => Ok(ChessFile::B),
+            'c' | 'C' => Ok(ChessFile::C),
+            'd' | 'D' => Ok(ChessFile::D),
+            'e' | 'E' => Ok(ChessFile::E),
+            'f' | 'F' => Ok(ChessFile::F),
+            'g' | 'G' => Ok(ChessFile::G),
+            'h' | 'H' => Ok(ChessFile::H),
+            _ => Err(ChessFileParseError),
         }
     }
 }
@@ -105,6 +105,18 @@ impl ChessFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_to_int() {
+        assert_eq!(ChessFile::A.to_int(), 1);
+        assert_eq!(ChessFile::B.to_int(), 2);
+        assert_eq!(ChessFile::C.to_int(), 3);
+        assert_eq!(ChessFile::D.to_int(), 4);
+        assert_eq!(ChessFile::E.to_int(), 5);
+        assert_eq!(ChessFile::F.to_int(), 6);
+        assert_eq!(ChessFile::G.to_int(), 7);
+        assert_eq!(ChessFile::H.to_int(), 8);
+    }
 
     #[test]
     fn test_to_u8() {
@@ -132,27 +144,27 @@ mod tests {
 
     #[test]
     fn test_from_u8() {
-        assert_eq!(ChessFile::from_u8(1), Some(ChessFile::A));
-        assert_eq!(ChessFile::from_u8(2), Some(ChessFile::B));
-        assert_eq!(ChessFile::from_u8(3), Some(ChessFile::C));
-        assert_eq!(ChessFile::from_u8(4), Some(ChessFile::D));
-        assert_eq!(ChessFile::from_u8(5), Some(ChessFile::E));
-        assert_eq!(ChessFile::from_u8(6), Some(ChessFile::F));
-        assert_eq!(ChessFile::from_u8(7), Some(ChessFile::G));
-        assert_eq!(ChessFile::from_u8(8), Some(ChessFile::H));
-        assert_eq!(ChessFile::from_u8(9), None);
+        assert_eq!(ChessFile::from_u8(1), Ok(ChessFile::A));
+        assert_eq!(ChessFile::from_u8(2), Ok(ChessFile::B));
+        assert_eq!(ChessFile::from_u8(3), Ok(ChessFile::C));
+        assert_eq!(ChessFile::from_u8(4), Ok(ChessFile::D));
+        assert_eq!(ChessFile::from_u8(5), Ok(ChessFile::E));
+        assert_eq!(ChessFile::from_u8(6), Ok(ChessFile::F));
+        assert_eq!(ChessFile::from_u8(7), Ok(ChessFile::G));
+        assert_eq!(ChessFile::from_u8(8), Ok(ChessFile::H));
+        assert_eq!(ChessFile::from_u8(9), Err(ChessFileParseError));
     }
 
     #[test]
     fn test_from_char() {
-        assert_eq!(ChessFile::from_char('a'), Some(ChessFile::A));
-        assert_eq!(ChessFile::from_char('b'), Some(ChessFile::B));
-        assert_eq!(ChessFile::from_char('c'), Some(ChessFile::C));
-        assert_eq!(ChessFile::from_char('d'), Some(ChessFile::D));
-        assert_eq!(ChessFile::from_char('e'), Some(ChessFile::E));
-        assert_eq!(ChessFile::from_char('f'), Some(ChessFile::F));
-        assert_eq!(ChessFile::from_char('g'), Some(ChessFile::G));
-        assert_eq!(ChessFile::from_char('h'), Some(ChessFile::H));
-        assert_eq!(ChessFile::from_char('i'), None);
+        assert_eq!(ChessFile::from_char('a'), Ok(ChessFile::A));
+        assert_eq!(ChessFile::from_char('b'), Ok(ChessFile::B));
+        assert_eq!(ChessFile::from_char('c'), Ok(ChessFile::C));
+        assert_eq!(ChessFile::from_char('d'), Ok(ChessFile::D));
+        assert_eq!(ChessFile::from_char('e'), Ok(ChessFile::E));
+        assert_eq!(ChessFile::from_char('f'), Ok(ChessFile::F));
+        assert_eq!(ChessFile::from_char('g'), Ok(ChessFile::G));
+        assert_eq!(ChessFile::from_char('h'), Ok(ChessFile::H));
+        assert_eq!(ChessFile::from_char('i'), Err(ChessFileParseError));
     }
 }

@@ -32,8 +32,10 @@ pub trait MovePolicy: Send + Sync {
                 Ordering::Equal => {
                     let pa_play = a.signals.play_rate.unwrap_or(PlayRate::new(-1.0));
                     let pb_play = b.signals.play_rate.unwrap_or(PlayRate::new(-1.0));
+                    let str_a = format!("{}{}", a.uci.from.to_coords(), a.uci.to.to_coords());
+                    let str_b = format!("{}{}", b.uci.from.to_coords(), b.uci.to.to_coords());
                     match pa_play.compare(&pb_play) {
-                        Ordering::Equal => a.uci.cmp(&b.uci),
+                        Ordering::Equal => str_a.cmp(&str_b),
                         other => other,
                     }
                 }

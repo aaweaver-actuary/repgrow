@@ -9,7 +9,6 @@ pub mod play_rate;
 pub mod popularity_row;
 pub mod repertoire_node;
 pub mod signals;
-pub mod uci;
 
 pub use candidate_move::CandidateMove;
 pub use candidate_request::CandidateRequest;

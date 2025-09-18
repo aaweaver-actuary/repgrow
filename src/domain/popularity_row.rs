@@ -1,6 +1,8 @@
+use crate::domain::{PlayRate, chess::UciMove};
+
 #[derive(Clone, Debug)]
 pub struct PopularityRow {
-    pub uci: String,
-    pub play_rate: f32,
+    pub uci: UciMove,
+    pub play_rate: PlayRate,
     pub games: u32,
 }

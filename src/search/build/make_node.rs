@@ -1,10 +1,10 @@
-use crate::domain::{FenKey, RepertoireNode};
+use crate::domain::{FenKey, RepertoireNode, chess::UciMove};
 
 /// Make a node (id set by arena)
 pub fn make_node(
     parent: Option<u64>,
     fen_key: &FenKey,
-    last_uci: Option<String>,
+    last_uci: Option<UciMove>,
     ply: u32,
 ) -> RepertoireNode {
     RepertoireNode {

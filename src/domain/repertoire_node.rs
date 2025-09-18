@@ -2,15 +2,14 @@
 /// Each node corresponds to a position reached by a sequence of moves.
 /// The tree is stored in an arena, with nodes referencing children by their IDs.
 use super::fen_key::FenKey;
-use crate::domain::{PieceColor, Signals};
-// use shakmaty::Color;
+use crate::domain::{PieceColor, Signals, chess::UciMove};
 
 #[derive(Clone, Debug)]
 pub struct RepertoireNode {
     pub id: u64,
     pub parent: Option<u64>,
     pub fen_key: FenKey,
-    pub last_move_uci: Option<String>,
+    pub last_move_uci: Option<UciMove>,
     pub ply_depth: u32,
     pub children: Vec<u64>,
     pub signals: Signals,
@@ -21,7 +20,7 @@ impl RepertoireNode {
         id: u64,
         parent: Option<u64>,
         fen_key: FenKey,
-        last_move_uci: Option<String>,
+        last_move_uci: Option<UciMove>,
         ply_depth: u32,
     ) -> Self {
         Self {
@@ -68,12 +67,21 @@ mod tests {
             fen_string: "8/8/8/8/8/8/8/8 w - - 0 1".to_string(),
             side_to_move: PieceColor::Black,
         };
-        let node = RepertoireNode::new(42, Some(1), fen_key.clone(), Some("e2e4".to_string()), 5);
+        let node = RepertoireNode::new(
+            42,
+            Some(1),
+            fen_key.clone(),
+            Some(UciMove::from_uci("e2e4").unwrap()),
+            5,
+        );
         assert_eq!(node.id, 42);
         assert_eq!(node.parent, Some(1));
         assert_eq!(node.fen_key.fen_string, fen_key.fen_string);
         assert_eq!(node.fen_key.side_to_move, PieceColor::Black);
-        assert_eq!(node.last_move_uci, Some("e2e4".to_string()));
+        assert_eq!(
+            Some(node.last_move_uci.unwrap().to_uci()),
+            Some("e2e4".to_string())
+        );
         assert_eq!(node.ply_depth, 5);
         assert!(node.children.is_empty());
         assert_eq!(node.signals, Signals::default());
@@ -130,16 +138,17 @@ mod tests {
                 fen_string: "testfen".to_string(),
                 side_to_move: PieceColor::Black,
             },
-            Some("g1f3".to_string()),
+            Some(UciMove::from_uci("g1f3").unwrap()),
             12,
         );
         let node2 = node.clone();
         assert_eq!(node.id, node2.id);
         let dbg = format!("{:?}", node2);
+        dbg!(dbg.clone());
         assert!(dbg.contains("RepertoireNode"));
         assert!(dbg.contains("id: 99"));
         assert!(dbg.contains("parent: Some(88)"));
         assert!(dbg.contains("fen_key"));
-        assert!(dbg.contains("last_move_uci: Some(\"g1f3\")"));
+        assert!(dbg.contains("last_move_uci: Some(UciMove { from: ChessSquare(G, One), to: ChessSquare(F, Three), promotion: None })"));
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     config::SearchConfig,
     domain::{CandidateRequest, Centipawns, FenKey, PlayRate, RepertoireNode},
     policy::{Decision, MovePolicy},
-    provider::{normalize_popularity, normalize_quality, MovePopularity, MoveQuality},
+    provider::{MovePopularity, MoveQuality, normalize_popularity, normalize_quality},
 };
 use dashmap::DashSet;
 use std::sync::Arc;
@@ -74,12 +74,12 @@ pub async fn expand_node_task(
     // Apply moves → create children → enqueue
     let mut child_ids = Vec::with_capacity(cands.len());
     for c in cands {
-        if let Ok((next_fen, _stm)) = apply_uci(&fen_key, &c.uci) {
+        if let Ok((next_fen, _stm)) = apply_uci(&fen_key, &c.uci.to_uci()) {
             let child = RepertoireNode {
                 id: 0,
                 parent: Some(nid),
                 fen_key: next_fen,
-                last_move_uci: Some(c.uci.clone()),
+                last_move_uci: Some(c.uci),
                 ply_depth: ply_depth + 1,
                 children: Vec::new(),
                 signals: Default::default(),

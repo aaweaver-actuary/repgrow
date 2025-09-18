@@ -1,9 +1,11 @@
+use crate::domain::chess::UciMove;
+
 use super::fen_key::FenKey;
 use super::signals::Signals;
 
 #[derive(Clone, Debug)]
 pub struct CandidateMove {
-    pub uci: String,
+    pub uci: UciMove,
     pub next_fen: FenKey,
     pub signals: Signals,
 }
@@ -17,7 +19,7 @@ mod tests {
     #[test]
     fn test_candidate_move_creation() {
         let move_ = CandidateMove {
-            uci: "e2e4".to_string(),
+            uci: UciMove::from_uci("e2e4").unwrap(),
             next_fen: FenKey {
                 fen_string: "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
                     .to_string(),
@@ -31,7 +33,7 @@ mod tests {
             },
         };
 
-        assert_eq!(move_.uci, "e2e4");
+        assert_eq!(move_.uci, UciMove::from_uci("e2e4").unwrap());
         assert_eq!(
             move_.next_fen.fen_string,
             "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
